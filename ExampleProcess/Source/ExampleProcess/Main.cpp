@@ -25,8 +25,7 @@
 int main() {
     printf("[ExampleProcess] started (pid=%lu)\n\n", GetCurrentProcessId());
 
-    // Entity used for VTable hook tests
-    CEntity entity("TestEntity", 10);
+    IEntity* pEntity = new CEntity("TestEntity", 20);
 
     int tick = 0;
     while (true) {
@@ -35,20 +34,20 @@ int main() {
         // ── VTable hook target ───────────────────────────────────────────────
         // ExampleUsage hooks IEntity::Update (vtable slot 3) and / or
         // IEntity::GetHealth (vtable slot 0).
-        entity.Update();
+        pEntity->Update();
 
-        int hp = entity.GetHealth();
+        int hp = pEntity->GetHealth();
         printf("[main] entity hp = %d\n", hp);
 
         if (GetAsyncKeyState(VK_RSHIFT)) {
-            entity.SetHealth(100);
+            pEntity->SetHealth(100);
             printf("[main] hp reset to 100\n");
 
         }
 
         // Reset HP so the process runs indefinitely for testing
         if (hp <= 0) {
-            entity.SetHealth(200);
+            pEntity->SetHealth(200);
             printf("[main] hp reset to 200\n");
         }
 

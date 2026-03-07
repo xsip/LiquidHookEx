@@ -146,6 +146,7 @@
   <ItemGroup>
     <ClInclude Include="Include\ExampleUsage\Include.h" />
     <ClInclude Include="Include\ExampleUsage\CallSiteHook.h" />
+    <ClInclude Include="Include\ExampleUsage\VTableHook.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\ExampleUsage\Main.cpp" />

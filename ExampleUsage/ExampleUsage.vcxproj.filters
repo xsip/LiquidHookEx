@@ -21,6 +21,9 @@
     <ClInclude Include="Include\ExampleUsage\CallSiteHook.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\ExampleUsage\VTableHook.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\ExampleUsage\Main.cpp">
