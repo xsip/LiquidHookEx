@@ -7,6 +7,5 @@ Intermediate
 **/*/*.user
 **/*/*.suo
 *.mdmp
-*.lib
 hooks.json
 *.zip
