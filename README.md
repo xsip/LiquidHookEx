@@ -1,4 +1,4 @@
-# LiquidHookEx [Preview Video here](https://www.youtube.com/watch?v=XncMj_yiuTc)
+# LiquidHookEx - External Hooking Library [Preview Video here](https://www.youtube.com/watch?v=XncMj_yiuTc)
 ![Header](https://raw.githubusercontent.com/xsip/LiquidHookEx/refs/heads/main/header.png)
 **LiquidHookEx** is an external x64 process hooking library for Windows. It operates entirely from outside the target process — no injected DLL, no in-process threads. Hooks are installed by writing shellcode and hook data directly into the target process's virtual memory via `WriteProcessMemory`, then redirecting execution either by patching a vtable slot pointer or by overwriting a specific call instruction at a known call site.
 
@@ -496,3 +496,4 @@ LiquidHookEx/
 
 
 ```
+
