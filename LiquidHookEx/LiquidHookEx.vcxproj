@@ -142,6 +142,7 @@
   <ItemGroup>
     <ClInclude Include="Include\LiquidHookEx\CallSite.h" />
     <ClInclude Include="Include\LiquidHookEx\Config.h" />
+    <ClInclude Include="Include\LiquidHookEx\Detour.h" />
     <ClInclude Include="Include\LiquidHookEx\Globals.h" />
     <ClInclude Include="Include\LiquidHookEx\Include.h" />
     <ClInclude Include="Include\LiquidHookEx\Pattern.h" />
