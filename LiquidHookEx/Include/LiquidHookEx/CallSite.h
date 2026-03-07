@@ -380,6 +380,17 @@ namespace LiquidHookEx {
             else if (buf[0] == 0xFF && (buf[1] & 0xF8) == 0x10) {
                 instrLen = 2;
             }
+            // 41 FF 50 xx  –  call qword ptr [r8+disp8]   (4 bytes, REX.B + FF /2 mod=01b)
+            // 41 FF 90 xx xx xx xx – call qword ptr [r8+disp32] (7 bytes, REX.B + FF /2 mod=10b)
+            // Covers any REX prefix (40–4F) before FF /2 — callee address not resolvable statically.
+            else if (buf[0] >= 0x40 && buf[0] <= 0x4F && buf[1] == 0xFF &&
+                (buf[2] & 0x38) == 0x10)
+            {
+                uint8_t mod = (buf[2] & 0xC0) >> 6;
+                if (mod == 0x01)       instrLen = 4;  // disp8:  REX FF /2 ModRM disp8
+                else if (mod == 0x02)  instrLen = 7;  // disp32: REX FF /2 ModRM disp32
+                else                   instrLen = 3;  // mod=00: REX FF /2 ModRM (no disp)
+            }
             else {
                 printf("[!] %s: unrecognized call form at call site: %02X %02X ...\n",
                     m_szName.c_str(), buf[0], buf[1]);
