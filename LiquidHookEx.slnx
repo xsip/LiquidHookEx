@@ -6,4 +6,5 @@
   <Project Path="ExampleProcess/ExampleProcess.vcxproj" Id="54eb7a11-090d-4395-b426-87ef8a799559" />
   <Project Path="ExampleUsage/ExampleUsage.vcxproj" Id="896c2e1e-0404-4a54-b625-3eaf130a342b" />
   <Project Path="LiquidHookEx/LiquidHookEx.vcxproj" Id="00b59da1-017f-445c-ac10-87928d2e1d87" />
+  <Project Path="SingleHeaderExample/SingleHeaderExample.vcxproj" Id="ffdf004c-25ab-43e5-89cf-fb5a78b077af" />
 </Solution>
