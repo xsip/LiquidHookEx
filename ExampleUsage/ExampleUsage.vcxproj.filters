@@ -18,7 +18,7 @@
     <ClInclude Include="Include\ExampleUsage\Include.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\ExampleUsage\VTableHook.h">
+    <ClInclude Include="Include\ExampleUsage\CallSiteHook.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
