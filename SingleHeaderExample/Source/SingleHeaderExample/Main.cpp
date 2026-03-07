@@ -2,5 +2,5 @@
 #pragma comment(lib, "LiquidHookEx.lib")
 
 int main() {
-
+	LiquidHookEx::INIT("ExampleProcess.exe");
 }

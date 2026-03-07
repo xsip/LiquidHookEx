@@ -1,5 +1,3 @@
-
-
 # LiquidHookEx
 ![Header](https://raw.githubusercontent.com/xsip/LiquidHookEx/refs/heads/main/header.png)
 **LiquidHookEx** is an external x64 process hooking library for Windows. It operates entirely from outside the target process — no injected DLL, no in-process threads. Hooks are installed by writing shellcode and hook data directly into the target process's virtual memory via `WriteProcessMemory`, then redirecting execution either by patching a vtable slot pointer or by overwriting a specific call instruction at a known call site.
@@ -66,8 +64,14 @@ When the target process calls the hooked function, it executes the shellcode. Th
 ### API
 
 ```cpp
-// Construct — name is used for logging and HookConfig persistence
-LiquidHookEx::VTable m_hook("MyHookName");
+// Initialise the global process handle (used as fallback by all hooks)
+LiquidHookEx::INIT("target.exe");
+
+// Construct — name is used for logging and HookConfig persistence.
+// A Process* can optionally be passed as the second argument; if omitted,
+// the process initialised by INIT() is used automatically.
+LiquidHookEx::VTable m_hook("MyHookName");            // uses INIT() process
+LiquidHookEx::VTable m_hook("MyHookName", pMyProc);   // uses explicit instance
 
 // Install the hook
 m_hook.Hook<MyHookData>(
@@ -152,7 +156,10 @@ The `FF 15` patch is always 6 bytes. If the original instruction is shorter (e.g
 ### API
 
 ```cpp
-LiquidHookEx::CallSite m_hook("MyCallSiteHook");
+// A Process* can optionally be passed as the second argument; if omitted,
+// the process initialised by INIT() is used automatically.
+LiquidHookEx::CallSite m_hook("MyCallSiteHook");           // uses INIT() process
+LiquidHookEx::CallSite m_hook("MyCallSiteHook", pMyProc);  // uses explicit instance
 
 m_hook.Hook<MyHookData>(
     "41 FF 50 10 48 8D 0D",  // pattern matching the call instruction (+ context bytes for uniqueness)
@@ -401,6 +408,8 @@ Note that `g_pOriginalFunction` is declared but not used as a `RipSlot` — it i
 ### 2. Install the hook
 
 ```cpp
+LiquidHookEx::INIT("ExampleProcess.exe");
+
 LiquidHookEx::CallSite m_Hook("SetHealthHook");
 
 CallSiteExample::SetHealthHookData hookData{};
