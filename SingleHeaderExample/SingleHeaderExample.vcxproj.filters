@@ -18,6 +18,12 @@
     <ClInclude Include="Include\SingleHeaderExample\LiquidHookEx.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\SingleHeaderExample\CallSiteHook.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\SingleHeaderExample\VTableHook.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\SingleHeaderExample\Main.cpp">

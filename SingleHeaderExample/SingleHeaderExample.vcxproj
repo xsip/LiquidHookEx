@@ -143,7 +143,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="Include\SingleHeaderExample\CallSiteHook.h" />
     <ClInclude Include="Include\SingleHeaderExample\LiquidHookEx.h" />
+    <ClInclude Include="Include\SingleHeaderExample\VTableHook.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\SingleHeaderExample\Main.cpp" />
