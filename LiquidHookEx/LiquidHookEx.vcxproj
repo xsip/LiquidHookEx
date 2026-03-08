@@ -145,6 +145,7 @@
     <ClInclude Include="Include\LiquidHookEx\Detour.h" />
     <ClInclude Include="Include\LiquidHookEx\Globals.h" />
     <ClInclude Include="Include\LiquidHookEx\Include.h" />
+    <ClInclude Include="Include\LiquidHookEx\Macros.h" />
     <ClInclude Include="Include\LiquidHookEx\Pattern.h" />
     <ClInclude Include="Include\LiquidHookEx\Process.h" />
     <ClInclude Include="Include\LiquidHookEx\SysCallManager.h" />

@@ -17,10 +17,7 @@ namespace VTableExample {
     static void* g_pOriginalFunction = nullptr;
     static GetHealthHookData* g_pHookData = nullptr;
 
-#pragma code_seg(".getHealthHook")
-#pragma optimize("", off)
-#pragma runtime_checks("", off)
-#pragma check_stack(off)
+    LH_START(".GetHealthHook")
 
     // VTable hook for CEntity::GetHealth(void)
     // Signature matches the original: int __fastcall GetHealth(CEntity* this)
@@ -42,10 +39,6 @@ namespace VTableExample {
     }
 
     void hkGetHealthEnd() {}
-
-#pragma check_stack()
-#pragma runtime_checks("", restore)
-#pragma optimize("", on)
-#pragma code_seg()
+    LH_END()
 
 } // namespace VTableExample

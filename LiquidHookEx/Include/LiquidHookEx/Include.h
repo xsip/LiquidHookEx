@@ -5,3 +5,4 @@
 #include <LiquidHookEx/Process.h>
 
 #include <LiquidHookEx/Globals.h>
+#include <LiquidHookEx/Macros.h>
