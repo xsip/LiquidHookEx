@@ -209,16 +209,13 @@ RipSlot::Custom(&g_pSomething, addr)   // remote cell → caller-supplied absolu
 
 ## Shellcode authoring rules
 
-Shellcode must be isolated in its own code segment and compiled with all runtime helpers disabled, so the byte range `[fnStart, fnEnd)` contains only your logic:
+Shellcode must be isolated in its own code segment and compiled with all runtime helpers disabled, so the byte range `[fnStart, fnEnd)` contains only your logic. Use the `LH_START(<segname>)` / `LH_END()` macros to wrap the shellcode — they expand to the required `__pragma` directives for `code_seg`, `optimize`, `runtime_checks`, and `check_stack`:
 
 ```cpp
 static void* g_pOriginalFunc = nullptr;
 static MyHookData* g_pHookData = nullptr;
 
-#pragma code_seg(".myHook")
-#pragma optimize("", off)
-#pragma runtime_checks("", off)
-#pragma check_stack(off)
+LH_START(".myHook")
 
 RetType __fastcall MyClass::hkMyFunc(Args...) {
     volatile uintptr_t _dummy = reinterpret_cast<uintptr_t>(firstArg); // force stack frame
@@ -234,10 +231,7 @@ RetType __fastcall MyClass::hkMyFunc(Args...) {
 
 void MyClass::hkMyFuncEnd() {}
 
-#pragma check_stack()
-#pragma runtime_checks("", restore)
-#pragma optimize("", on)
-#pragma code_seg()
+LH_END()
 ```
 
 Key rules:
@@ -280,10 +274,7 @@ namespace VTableExample {
     static void* g_pOriginalFunction = nullptr;
     static GetHealthHookData* g_pHookData = nullptr;
 
-#pragma code_seg(".getHealthHook")
-#pragma optimize("", off)
-#pragma runtime_checks("", off)
-#pragma check_stack(off)
+LH_START(".getHealthHook")
 
     int __fastcall hkGetHealth(CEntity* pEntity)
     {
@@ -300,10 +291,7 @@ namespace VTableExample {
 
     void hkGetHealthEnd() {}
 
-#pragma check_stack()
-#pragma runtime_checks("", restore)
-#pragma optimize("", on)
-#pragma code_seg()
+LH_END()
 }
 ```
 
@@ -373,10 +361,7 @@ namespace CallSiteExample {
     static void* g_pOriginalFunction = nullptr;  // unused here — call form not statically resolvable
     static SetHealthHookData* g_pHookData = nullptr;
 
-#pragma code_seg(".setHealthHook")
-#pragma optimize("", off)
-#pragma runtime_checks("", off)
-#pragma check_stack(off)
+LH_START(".setHealthHook")
 
     void __fastcall hkSetHealth(CEntity* pEntity, int health)
     {
@@ -396,10 +381,7 @@ namespace CallSiteExample {
 
     void hkSetHealthEnd() {}
 
-#pragma check_stack()
-#pragma runtime_checks("", restore)
-#pragma optimize("", on)
-#pragma code_seg()
+LH_END()
 }
 ```
 
@@ -496,4 +478,3 @@ LiquidHookEx/
 
 
 ```
-
