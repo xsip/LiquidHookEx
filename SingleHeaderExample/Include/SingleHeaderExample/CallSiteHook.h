@@ -19,10 +19,7 @@ namespace CallSiteExample {
 
     static SetHealthHookData* g_pHookData = nullptr;
 
-#pragma code_seg(".setHealthHook")
-#pragma optimize("", off)
-#pragma runtime_checks("", off)
-#pragma check_stack(off)
+    LH_START(".SetHealthHook")
 
     void __fastcall hkSetHealth(CEntity* pEntity, int health)
     {
@@ -46,8 +43,6 @@ namespace CallSiteExample {
 
     void hkSetHealthEnd() {}
 
-#pragma check_stack()
-#pragma runtime_checks("", restore)
-#pragma optimize("", on)
-#pragma code_seg()
+    LH_END()
+
 }
