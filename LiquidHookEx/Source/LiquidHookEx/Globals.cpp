@@ -3,7 +3,7 @@
 namespace LiquidHookEx {
 	Process* proc = nullptr;
 
-	void INIT(std::string procName) {
-		LiquidHookEx::proc = new Process(procName);
+	void INIT(std::string procName, Process::TargetArch targetArch) {
+		LiquidHookEx::proc = new Process(procName, targetArch);
 	}
 }

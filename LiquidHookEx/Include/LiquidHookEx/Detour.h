@@ -162,13 +162,20 @@ namespace LiquidHookEx {
                 return false;
             }
 
+            // ── architecture guard ───────────────────────────────────
+            if (!(m_pProc ? m_pProc : LiquidHookEx::proc)->IsTarget64()) {
+                printf("[!] %s::Hook => You are trying to use Detour on a 32-bit process. Use Detour86 instead.\n",
+                    m_szName.c_str());
+                return false;
+            }
+
             if (TryRestore<HOOK_DATA>()) {
                 printf("[+] %s: restored from saved state\n", m_szName.c_str());
                 return true;
             }
 
             // ── locate module ────────────────────────────────────────────────
-            auto pMod = (m_pProc ? m_pProc : LiquidHookEx::proc)->GetRemoteModule(dllName.c_str());
+            auto pMod = (m_pProc ? m_pProc : LiquidHookEx::proc)->GetRemoteModule(dllName.c_str(),false);
             if (!pMod || !pMod->IsValid()) {
                 printf("[!] %s: failed to get %s\n", m_szName.c_str(), dllName.c_str());
                 return false;

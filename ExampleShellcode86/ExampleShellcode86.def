@@ -1,0 +1,7 @@
+LIBRARY ExampleShellcode86
+
+EXPORTS
+    SetHealthCallSite_Hook
+    SetHealthCallSite_Hook_End
+    g_CallSiteHookData
+    g_pCallSiteOriginal

@@ -3,8 +3,16 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
+  <Project Path="CreateShellCodeProject86/CreateShellCodeProject86.vcxproj" Id="7712de03-98f7-4cb4-88b5-2ffec86b5da8" />
   <Project Path="ExampleProcess/ExampleProcess.vcxproj" Id="54eb7a11-090d-4395-b426-87ef8a799559" />
+  <Project Path="ExampleProcess86/ExampleProcess86.vcxproj" Id="44c2f89c-17e4-404d-bed7-9f18fde4b8fc">
+    <Platform Project="Win32" />
+  </Project>
+  <Project Path="ExampleShellcode86/ExampleShellcode86.vcxproj" Id="247fa9c9-15a0-4cfb-8f7a-626e09afd219">
+    <Platform Project="Win32" />
+  </Project>
   <Project Path="ExampleUsage/ExampleUsage.vcxproj" Id="896c2e1e-0404-4a54-b625-3eaf130a342b" />
+  <Project Path="ExampleUsage86/ExampleUsage86.vcxproj" Id="15f425c3-b101-4e02-87a7-b0a7ff5a3295" />
   <Project Path="LiquidHookEx/LiquidHookEx.vcxproj" Id="00b59da1-017f-445c-ac10-87928d2e1d87" />
   <Project Path="SingleHeaderExample/SingleHeaderExample.vcxproj" Id="ffdf004c-25ab-43e5-89cf-fb5a78b077af" />
 </Solution>

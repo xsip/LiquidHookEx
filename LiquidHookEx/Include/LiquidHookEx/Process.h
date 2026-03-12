@@ -5,8 +5,8 @@
 #include <TlHelp32.h>
 #include <psapi.h>
 #include <vector>
-#define LIQUID_HOOK_EX_SYSCALL
-#ifdef LIQUID_HOOK_EX_SYSCALL
+#define LIQUID_HOOK_EX_SYSCALL_X64
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
 #include <LiquidHookEx/SyscallManager.h>
 #endif
 #undef min
@@ -79,7 +79,24 @@ namespace LiquidHookEx {
 
 	class Process {
 	public:
+		// Describes the bitness of the *target* process, not the tool itself.
+		// x64 = 64-bit target (default, original behaviour)
+		// x86 = 32-bit target (pointer width 4, different vtable stride, etc.)
+		enum class TargetArch {
+			x64,
+			x86,
+		};
+
 		HANDLE m_hProc{};
+		TargetArch m_targetArch{ TargetArch::x64 };
+
+		// Convenience helpers used throughout the hooking layer.
+		bool IsTarget64() const { return m_targetArch == TargetArch::x64; }
+		bool IsTarget32() const { return m_targetArch == TargetArch::x86; }
+
+		// Width of a pointer in the *target* address space.
+		size_t TargetPtrSize() const { return IsTarget64() ? 8u : 4u; }
+
 	private:
 		DWORD pProcId{};
 		HWND m_hWnd;
@@ -94,14 +111,16 @@ namespace LiquidHookEx {
 
 	public:
 		HWND GetHwnd();
-		Process(std::string szProcName);
+		Process(std::string szProcName, TargetArch targetArch = TargetArch::x64);
 		PVOID Alloc(size_t size, DWORD fFLags = MEM_COMMIT | MEM_RESERVE, DWORD fAccess = PAGE_READWRITE);
 
 		template <typename T>
 		inline bool Read(uintptr_t m_Address, T* m_Buffer, SIZE_T m_Size)
 		{
 			SIZE_T bytesRead;
-#ifdef LIQUID_HOOK_EX_SYSCALL
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+			if (IsTarget32())
+				return ::ReadProcessMemory(m_hProc, reinterpret_cast<LPCVOID>(m_Address), m_Buffer, m_Size, &bytesRead);
 			auto res = SyscallManager::ReadMemoryDirect(m_hProc, reinterpret_cast<PVOID>(m_Address), m_Buffer, m_Size);
 #else
 			auto res = ::ReadProcessMemory(m_hProc, reinterpret_cast<LPCVOID>(m_Address), m_Buffer, m_Size, &bytesRead);
@@ -145,23 +164,21 @@ namespace LiquidHookEx {
 			if constexpr (std::is_same_v<T, bool>)
 			{
 				std::vector<uint8_t> temp(count);
-#ifdef LIQUID_HOOK_EX_SYSCALL
-				if (!SyscallManager::ReadMemoryDirect(
-					m_hProc,
-					reinterpret_cast<PVOID>(address),
-					temp.data(),
-					count * sizeof(uint8_t)))
-#else
-				if (!::ReadProcessMemory(
-					m_hProc,
-					reinterpret_cast<LPCVOID>(address),
-					temp.data(),
-					count * sizeof(uint8_t),
-					&bytesRead))
-#endif
-				{
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+			if (IsTarget32()) {
+				if (!::ReadProcessMemory(m_hProc, reinterpret_cast<LPCVOID>(address),
+					temp.data(), count * sizeof(uint8_t), &bytesRead))
 					return {};
-				}
+			}
+			else if (!SyscallManager::ReadMemoryDirect(m_hProc, reinterpret_cast<PVOID>(address),
+				temp.data(), count * sizeof(uint8_t)))
+#else
+			if (!::ReadProcessMemory(m_hProc, reinterpret_cast<LPCVOID>(address),
+				temp.data(), count * sizeof(uint8_t), &bytesRead))
+#endif
+			{
+				return {};
+			}
 
 				std::vector<bool> result;
 				result.reserve(count);
@@ -173,24 +190,22 @@ namespace LiquidHookEx {
 			else
 			{
 				std::vector<T> buffer(count);
-#ifdef LIQUID_HOOK_EX_SYSCALL
-				if (!SyscallManager::ReadMemoryDirect(
-					m_hProc,
-					reinterpret_cast<PVOID>(address),
-					buffer.data(),
-					count * sizeof(T)))
-#else
-				if (!::ReadProcessMemory(
-					m_hProc,
-					reinterpret_cast<LPCVOID>(address),
-					buffer.data(),
-					count * sizeof(T),
-					&bytesRead))
-#endif
-				{
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+			if (IsTarget32()) {
+				if (!::ReadProcessMemory(m_hProc, reinterpret_cast<LPCVOID>(address),
+					buffer.data(), count * sizeof(T), &bytesRead))
 					buffer.clear();
-				}
-				return buffer;
+			}
+			else if (!SyscallManager::ReadMemoryDirect(m_hProc, reinterpret_cast<PVOID>(address),
+				buffer.data(), count * sizeof(T)))
+#else
+			if (!::ReadProcessMemory(m_hProc, reinterpret_cast<LPCVOID>(address),
+				buffer.data(), count * sizeof(T), &bytesRead))
+#endif
+			{
+				buffer.clear();
+			}
+			return buffer;
 			}
 		}
 
@@ -206,36 +221,28 @@ namespace LiquidHookEx {
 				for (bool b : data)
 					temp.push_back(b ? 1 : 0);
 
-#ifdef LIQUID_HOOK_EX_SYSCALL
-				return SyscallManager::WriteMemoryDirect(
-					m_hProc,
-					reinterpret_cast<PVOID>(address),
-					temp.data(),
-					temp.size() * sizeof(uint8_t));
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+				if (IsTarget32())
+					return ::WriteProcessMemory(m_hProc, reinterpret_cast<LPVOID>(address),
+						temp.data(), temp.size() * sizeof(uint8_t), &bytesWritten) != 0;
+				return SyscallManager::WriteMemoryDirect(m_hProc, reinterpret_cast<PVOID>(address),
+					temp.data(), temp.size() * sizeof(uint8_t));
 #else
-				return ::WriteProcessMemory(
-					m_hProc,
-					reinterpret_cast<LPVOID>(address),
-					temp.data(),
-					temp.size() * sizeof(uint8_t),
-					&bytesWritten) != 0;
+				return ::WriteProcessMemory(m_hProc, reinterpret_cast<LPVOID>(address),
+					temp.data(), temp.size() * sizeof(uint8_t), &bytesWritten) != 0;
 #endif
 			}
 			else
 			{
-#ifdef LIQUID_HOOK_EX_SYSCALL
-				return SyscallManager::WriteMemoryDirect(
-					m_hProc,
-					reinterpret_cast<PVOID>(address),
-					const_cast<T*>(data.data()),
-					data.size() * sizeof(T));
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+				if (IsTarget32())
+					return ::WriteProcessMemory(m_hProc, reinterpret_cast<LPVOID>(address),
+						data.data(), data.size() * sizeof(T), &bytesWritten) != 0;
+				return SyscallManager::WriteMemoryDirect(m_hProc, reinterpret_cast<PVOID>(address),
+					const_cast<T*>(data.data()), data.size() * sizeof(T));
 #else
-				return ::WriteProcessMemory(
-					m_hProc,
-					reinterpret_cast<LPVOID>(address),
-					data.data(),
-					data.size() * sizeof(T),
-					&bytesWritten) != 0;
+				return ::WriteProcessMemory(m_hProc, reinterpret_cast<LPVOID>(address),
+					data.data(), data.size() * sizeof(T), &bytesWritten) != 0;
 #endif
 			}
 		}
@@ -243,8 +250,13 @@ namespace LiquidHookEx {
 		inline std::vector<uint8_t> ReadBytes(uintptr_t address, size_t size) {
 			std::vector<uint8_t> buffer(size);
 			SIZE_T bytesRead{};
-#ifdef LIQUID_HOOK_EX_SYSCALL
-			if (!SyscallManager::ReadMemoryDirect(m_hProc, reinterpret_cast<PVOID>(address),
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+			if (IsTarget32()) {
+				if (!::ReadProcessMemory(m_hProc, reinterpret_cast<LPCVOID>(address),
+					buffer.data(), size, &bytesRead))
+					buffer.clear();
+			}
+			else if (!SyscallManager::ReadMemoryDirect(m_hProc, reinterpret_cast<PVOID>(address),
 				buffer.data(), size)) {
 				buffer.clear();
 			}
@@ -269,7 +281,9 @@ namespace LiquidHookEx {
 		inline bool Write(uintptr_t m_Address, T m_Buffer)
 		{
 			SIZE_T bytesWritten;
-#ifdef LIQUID_HOOK_EX_SYSCALL
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+			if (IsTarget32())
+				return ::WriteProcessMemory(m_hProc, (LPVOID)m_Address, (LPCVOID)&m_Buffer, sizeof(T), &bytesWritten);
 			auto res = SyscallManager::WriteMemoryDirect(m_hProc, (PVOID)m_Address, (PVOID)&m_Buffer, sizeof(T));
 #else
 			auto res = ::WriteProcessMemory(m_hProc, (LPVOID)m_Address, (LPCVOID)&m_Buffer, sizeof(T), &bytesWritten);
@@ -285,7 +299,11 @@ namespace LiquidHookEx {
 			buffer[writeLength] = '\0';
 
 			SIZE_T bytesWritten = 0;
-#ifdef LIQUID_HOOK_EX_SYSCALL
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+			if (IsTarget32()) {
+				BOOL res = ::WriteProcessMemory(m_hProc, (PVOID)address, buffer.data(), maxLength, &bytesWritten);
+				return res && bytesWritten == maxLength;
+			}
 			BOOL res = SyscallManager::WriteMemoryDirect(m_hProc, (PVOID)address, buffer.data(), maxLength);
 			return res;
 #else
@@ -304,7 +322,7 @@ namespace LiquidHookEx {
 			return std::string(buffer.data());
 		}
 
-		RemoteModule* GetRemoteModule(std::string szModuleName);
+		RemoteModule* GetRemoteModule(std::string szModuleName, bool bFailOnSyncError = true);
 
 		void TrackAllocation(void* pRemote);
 		bool FreeRemote(void* pRemote);
@@ -405,16 +423,23 @@ namespace LiquidHookEx {
 			uintptr_t vtablePtr = ReadDirect<uintptr_t>(pThis);
 			if (!vtablePtr) return 0;
 
-			uintptr_t funcPtr = ReadDirect<uintptr_t>(vtablePtr + (index * sizeof(void*)));
-			return funcPtr;
+			// Use target pointer width for the vtable slot stride.
+			const size_t stride = TargetPtrSize();
+			if (IsTarget64())
+				return ReadDirect<uint64_t>(vtablePtr + (index * stride));
+			else
+				return ReadDirect<uint32_t>(vtablePtr + (index * stride));
 		}
 
 		template <int index>
 		uintptr_t GetVTableFunctionFromVTable(uintptr_t vtableAddr) noexcept {
 			if (!vtableAddr) return 0;
 
-			uintptr_t funcPtr = ReadDirect<uintptr_t>(vtableAddr + (index * sizeof(void*)));
-			return funcPtr;
+			const size_t stride = TargetPtrSize();
+			if (IsTarget64())
+				return ReadDirect<uint64_t>(vtableAddr + (index * stride));
+			else
+				return ReadDirect<uint32_t>(vtableAddr + (index * stride));
 		}
 
 		std::vector<uintptr_t> ReadVTable(uintptr_t pThis, size_t count = 64) noexcept;

@@ -21,8 +21,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{00b59da1-017f-445c-ac10-87928d2e1d87}</ProjectGuid>
-    <RootNamespace>LiquidHookEx</RootNamespace>
+    <ProjectGuid>{15f425c3-b101-4e02-87a7-b0a7ff5a3295}</ProjectGuid>
+    <RootNamespace>ExampleUsage86</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -40,13 +40,13 @@
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
@@ -54,7 +54,6 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
-    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.props" />
   </ImportGroup>
   <ImportGroup Label="Shared">
   </ImportGroup>
@@ -73,13 +72,13 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)Bin\$(Platform)\$(Configuration)\</OutDir>
+    <IncludePath>$(ProjectDir)Include;$(SolutionDir)LiquidHookEx\Include;$(IncludePath)</IncludePath>
     <IntDir>$(SolutionDir)Intermediate\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <IncludePath>$(ProjectDir)Include;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)Bin\$(Platform)\$(Configuration)\</OutDir>
+    <IncludePath>$(ProjectDir)Include;$(SolutionDir)LiquidHookEx\Include;$(IncludePath)</IncludePath>
     <IntDir>$(SolutionDir)Intermediate\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <IncludePath>$(ProjectDir)Include;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -140,34 +139,17 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="Include\LiquidHookEx\CallSite.h" />
-    <ClInclude Include="Include\LiquidHookEx\CallSite86.h" />
-    <ClInclude Include="Include\LiquidHookEx\Config.h" />
-    <ClInclude Include="Include\LiquidHookEx\Detour.h" />
-    <ClInclude Include="Include\LiquidHookEx\Detour86.h" />
-    <ClInclude Include="Include\LiquidHookEx\Globals.h" />
-    <ClInclude Include="Include\LiquidHookEx\Include.h" />
-    <ClInclude Include="Include\LiquidHookEx\Macros.h" />
-    <ClInclude Include="Include\LiquidHookEx\Pattern.h" />
-    <ClInclude Include="Include\LiquidHookEx\Process.h" />
-    <ClInclude Include="Include\LiquidHookEx\ShellCodeDll86.h" />
-    <ClInclude Include="Include\LiquidHookEx\SysCallManager.h" />
-    <ClInclude Include="Include\LiquidHookEx\VTable.h" />
-    <ClInclude Include="Include\LiquidHookEx\VTable86.h" />
+    <ClInclude Include="Include\ExampleUsage86\Include.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Source\LiquidHookEx\Globals.cpp" />
-    <ClCompile Include="Source\LiquidHookEx\Pattern.cpp" />
-    <ClCompile Include="Source\LiquidHookEx\Process.cpp" />
-    <ClCompile Include="Source\LiquidHookEx\SysCallManager.cpp" />
+    <ClCompile Include="Source\ExampleUsage86\Main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <MASM Include="Include\LiquidHookEx\Syscalls_x64.asm">
-      <FileType>Document</FileType>
-    </MASM>
+    <ProjectReference Include="..\LiquidHookEx\LiquidHookEx.vcxproj">
+      <Project>{00b59da1-017f-445c-ac10-87928d2e1d87}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />
   </ImportGroup>
 </Project>

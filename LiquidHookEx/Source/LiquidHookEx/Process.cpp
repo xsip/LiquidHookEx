@@ -53,7 +53,6 @@ namespace LiquidHookEx {
 			return sections;
 		}
 
-
 		IMAGE_DOS_HEADER dosHeader{};
 		if (!m_pProc->Read(m_pBase, &dosHeader, sizeof(IMAGE_DOS_HEADER))) {
 			return sections;
@@ -63,18 +62,33 @@ namespace LiquidHookEx {
 			return sections;
 		}
 
-		IMAGE_NT_HEADERS ntHeaders{};
-		if (!m_pProc->Read(m_pBase + dosHeader.e_lfanew, &ntHeaders, sizeof(IMAGE_NT_HEADERS))) {
-			return sections;
+		WORD numberOfSections = 0;
+		uintptr_t sectionHeaderAddr = 0;
+
+		if (m_pProc->IsTarget64()) {
+			IMAGE_NT_HEADERS64 ntHeaders{};
+			if (!m_pProc->Read(m_pBase + dosHeader.e_lfanew, &ntHeaders, sizeof(IMAGE_NT_HEADERS64))) {
+				return sections;
+			}
+			if (ntHeaders.Signature != IMAGE_NT_SIGNATURE) {
+				return sections;
+			}
+			numberOfSections = ntHeaders.FileHeader.NumberOfSections;
+			sectionHeaderAddr = m_pBase + dosHeader.e_lfanew + sizeof(IMAGE_NT_HEADERS64);
+		}
+		else {
+			IMAGE_NT_HEADERS32 ntHeaders{};
+			if (!m_pProc->Read(m_pBase + dosHeader.e_lfanew, &ntHeaders, sizeof(IMAGE_NT_HEADERS32))) {
+				return sections;
+			}
+			if (ntHeaders.Signature != IMAGE_NT_SIGNATURE) {
+				return sections;
+			}
+			numberOfSections = ntHeaders.FileHeader.NumberOfSections;
+			sectionHeaderAddr = m_pBase + dosHeader.e_lfanew + sizeof(IMAGE_NT_HEADERS32);
 		}
 
-		if (ntHeaders.Signature != IMAGE_NT_SIGNATURE) {
-			return sections;
-		}
-
-		uintptr_t sectionHeaderAddr = m_pBase + dosHeader.e_lfanew + sizeof(IMAGE_NT_HEADERS);
-
-		for (WORD i = 0; i < ntHeaders.FileHeader.NumberOfSections; i++) {
+		for (WORD i = 0; i < numberOfSections; i++) {
 			IMAGE_SECTION_HEADER sectionHeader{};
 
 			if (!m_pProc->Read(sectionHeaderAddr + (i * sizeof(IMAGE_SECTION_HEADER)),
@@ -134,21 +148,38 @@ namespace LiquidHookEx {
 		if (!DOSHeader)
 			return 0x0;
 
-		auto NTHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>((uint8_t*)DTE + DOSHeader->e_lfanew);
-		if (!NTHeaders)
+		// Select the correct NT headers type based on the target architecture.
+		// m_pBase points to locally-synced memory, so the cast is safe.
+		DWORD exportDirRVA = 0;
+		DWORD exportDirSize = 0;
+
+		if (m_pProc->IsTarget64()) {
+			auto NTHeaders = reinterpret_cast<PIMAGE_NT_HEADERS64>(
+				(uint8_t*)DTE + DOSHeader->e_lfanew);
+			if (!NTHeaders) return 0x0;
+			auto& dir = NTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+			exportDirRVA  = dir.VirtualAddress;
+			exportDirSize = dir.Size;
+		}
+		else {
+			auto NTHeaders = reinterpret_cast<PIMAGE_NT_HEADERS32>(
+				(uint8_t*)DTE + DOSHeader->e_lfanew);
+			if (!NTHeaders) return 0x0;
+			auto& dir = NTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+			exportDirRVA  = dir.VirtualAddress;
+			exportDirSize = dir.Size;
+		}
+
+		if (!exportDirSize || !exportDirRVA)
 			return 0x0;
 
-		auto ExportsDataDirectory = &NTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-		if (!ExportsDataDirectory->Size || !ExportsDataDirectory->VirtualAddress)
-			return 0x0;
-
-		auto ExportDirectory = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>((uint8_t*)DTE + ExportsDataDirectory->VirtualAddress);
+		auto ExportDirectory = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>((uint8_t*)DTE + exportDirRVA);
 		if (!ExportDirectory)
 			return 0x0;
 
 		auto AddrFunctions = reinterpret_cast<uint32_t*>((uint8_t*)DTE + ExportDirectory->AddressOfFunctions);
-		auto AddrNames = reinterpret_cast<uint32_t*>((uint8_t*)DTE + ExportDirectory->AddressOfNames);
-		auto AddrOrdinals = reinterpret_cast<uint16_t*>((uint8_t*)DTE + ExportDirectory->AddressOfNameOrdinals);
+		auto AddrNames     = reinterpret_cast<uint32_t*>((uint8_t*)DTE + ExportDirectory->AddressOfNames);
+		auto AddrOrdinals  = reinterpret_cast<uint16_t*>((uint8_t*)DTE + ExportDirectory->AddressOfNameOrdinals);
 
 		for (uint32_t i = 0; i < ExportDirectory->NumberOfFunctions; i++)
 		{
@@ -163,19 +194,25 @@ namespace LiquidHookEx {
 	}
 
 
-	Process::Process(std::string szProcName) {
+	Process::Process(std::string szProcName, TargetArch targetArch) {
 		new (&remoteModuleList) std::map<std::string, RemoteModule*>{};
 		m_szProcName = szProcName;
+		m_targetArch = targetArch;
 		GetProcHandle();
 
-#ifdef LIQUID_HOOK_EX_SYSCALL
-		printf("[+] Syscall mode enabled for process %s (PID: %d)\n\n", szProcName.c_str(), pProcId);
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+		if (IsTarget64())
+			printf("[+] Syscall mode enabled for process %s (PID: %d)\n\n", szProcName.c_str(), pProcId);
+		else
+			printf("[+] x86 target — using Win32 APIs for process %s (PID: %d)\n\n", szProcName.c_str(), pProcId);
 #endif
 	}
 
 	PVOID Process::Alloc(size_t size, DWORD fFLags, DWORD fAccess) {
-#ifdef LIQUID_HOOK_EX_SYSCALL
-		void* pRemote = SyscallManager::AllocateMemoryDirect(m_hProc, size, fAccess);
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+		void* pRemote = IsTarget32()
+			? ::VirtualAllocEx(m_hProc, NULL, size, fFLags, fAccess)
+			: SyscallManager::AllocateMemoryDirect(m_hProc, size, fAccess);
 #else
 		void* pRemote = ::VirtualAllocEx(m_hProc, NULL, size, fFLags, fAccess);
 #endif
@@ -212,6 +249,9 @@ namespace LiquidHookEx {
 
 		auto sections = GetSections();
 
+		// Use the target process pointer width, not the tool's own pointer size.
+		const size_t ptrSize = m_pProc->TargetPtrSize();
+
 		for (const auto& section : sections) {
 			if (section.name == ".rdata") {
 				size_t sectionSize = section.size;
@@ -221,35 +261,46 @@ namespace LiquidHookEx {
 					continue;
 				}
 
-				for (size_t i = 0; i < sectionSize - 8; i += 8) {
-					uint64_t* ptrInSection = reinterpret_cast<uint64_t*>(&sectionData[i]);
+				for (size_t i = 0; i + ptrSize <= sectionSize; i += ptrSize) {
+					// Read a pointer-sized value from the section using the target width.
+					uintptr_t candidate = 0;
+					if (ptrSize == 8)
+						candidate = *reinterpret_cast<uint64_t*>(&sectionData[i]);
+					else
+						candidate = *reinterpret_cast<uint32_t*>(&sectionData[i]);
 
-					if (*ptrInSection == fn) {
-						uintptr_t vtableStart = 0;
-						int functionIndex = 0;
+					if (candidate != fn)
+						continue;
 
-						size_t backScan = i;
-						while (backScan >= 8) {
-							backScan -= 8;
-							uint64_t* candidatePtr = reinterpret_cast<uint64_t*>(&sectionData[backScan]);
+					uintptr_t vtableStart = 0;
+					int functionIndex = 0;
 
-							if (*candidatePtr > GetAddr() &&
-								*candidatePtr < GetAddr() + GetSize()) {
-								functionIndex++;
-							}
-							else {
-								vtableStart = section.addr + backScan + 8;
-								break;
-							}
+					size_t backScan = i;
+					while (backScan >= ptrSize) {
+						backScan -= ptrSize;
+
+						uintptr_t bcandidate = 0;
+						if (ptrSize == 8)
+							bcandidate = *reinterpret_cast<uint64_t*>(&sectionData[backScan]);
+						else
+							bcandidate = *reinterpret_cast<uint32_t*>(&sectionData[backScan]);
+
+						if (bcandidate > GetAddr() &&
+							bcandidate < GetAddr() + GetSize()) {
+							functionIndex++;
 						}
-
-						if (vtableStart == 0) {
-							vtableStart = section.addr + (i - (functionIndex * 8));
+						else {
+							vtableStart = section.addr + backScan + ptrSize;
+							break;
 						}
+					}
 
-						if (vtableStart > 0 && functionIndex >= 0) {
-							return { functionIndex, vtableStart };
-						}
+					if (vtableStart == 0) {
+						vtableStart = section.addr + (i - (functionIndex * ptrSize));
+					}
+
+					if (vtableStart > 0 && functionIndex >= 0) {
+						return { functionIndex, vtableStart };
 					}
 				}
 			}
@@ -273,8 +324,10 @@ namespace LiquidHookEx {
 	bool Process::FreeRemote(void* pRemote) {
 		if (!pRemote) return false;
 
-#ifdef LIQUID_HOOK_EX_SYSCALL
-		BOOL result = SyscallManager::FreeMemoryDirect(m_hProc, pRemote);
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+		BOOL result = IsTarget32()
+			? ::VirtualFreeEx(m_hProc, pRemote, 0, MEM_RELEASE)
+			: SyscallManager::FreeMemoryDirect(m_hProc, pRemote);
 #else
 		BOOL result = ::VirtualFreeEx(m_hProc, pRemote, 0, MEM_RELEASE);
 #endif
@@ -295,8 +348,11 @@ namespace LiquidHookEx {
 
 		size_t freed = 0;
 		for (void* pRemote : m_remoteAllocations) {
-#ifdef LIQUID_HOOK_EX_SYSCALL
-			if (SyscallManager::FreeMemoryDirect(m_hProc, pRemote)) {
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+			BOOL freed_ok = IsTarget32()
+				? ::VirtualFreeEx(m_hProc, pRemote, 0, MEM_RELEASE)
+				: SyscallManager::FreeMemoryDirect(m_hProc, pRemote);
+			if (freed_ok) {
 #else
 			if (::VirtualFreeEx(m_hProc, pRemote, 0, MEM_RELEASE)) {
 #endif
@@ -311,7 +367,7 @@ namespace LiquidHookEx {
 		m_remoteAllocations.clear();
 	}
 
-	RemoteModule* Process::GetRemoteModule(std::string szModuleName) {
+	RemoteModule* Process::GetRemoteModule(std::string szModuleName, bool bFailOnSyncError) {
 		if (remoteModuleList.contains(szModuleName)) {
 			return remoteModuleList[szModuleName];
 		}
@@ -323,7 +379,7 @@ namespace LiquidHookEx {
 
 		auto mod = new RemoteModule((uintptr_t)moduleInfo.lpBaseOfDll, (uintptr_t)moduleInfo.SizeOfImage, this, szModuleName);
 		remoteModuleList.insert({ szModuleName , mod });
-		if (!remoteModuleList[szModuleName]->Sync()) {
+		if (!remoteModuleList[szModuleName]->Sync() && bFailOnSyncError) {
 			return {};
 		}
 
@@ -391,7 +447,9 @@ namespace LiquidHookEx {
 
 
 	bool Process::InitializeSysCalls() {
-#ifdef LIQUID_HOOK_EX_SYSCALL
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+		if (IsTarget32())
+			return true;  // x86 target — syscall stubs not used
 		if (!SyscallManager::Initialize()) {
 			printf("Failed to initialize syscalls!\n");
 			return false;
@@ -401,7 +459,7 @@ namespace LiquidHookEx {
 	}
 
 	void Process::GetProcHandle() {
-#ifdef LIQUID_HOOK_EX_SYSCALL
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
 		if (!InitializeSysCalls())
 			return;
 #endif
@@ -413,12 +471,21 @@ namespace LiquidHookEx {
 			if (!m_szProcName.compare(entry.szExeFile)) {
 				pProcId = entry.th32ProcessID;
 
-#ifdef LIQUID_HOOK_EX_SYSCALL
-				m_hProc = SyscallManager::OpenProcessDirect(
-					pProcId,
-					PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION |
-					PROCESS_QUERY_INFORMATION | PROCESS_CREATE_THREAD
-				);
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+				if (IsTarget32()) {
+					m_hProc = OpenProcess(
+						PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION |
+						PROCESS_QUERY_INFORMATION | PROCESS_CREATE_THREAD,
+						FALSE, pProcId
+					);
+				}
+				else {
+					m_hProc = SyscallManager::OpenProcessDirect(
+						pProcId,
+						PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION |
+						PROCESS_QUERY_INFORMATION | PROCESS_CREATE_THREAD
+					);
+				}
 #else
 				m_hProc = OpenProcess(
 					PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION |
@@ -494,8 +561,13 @@ namespace LiquidHookEx {
 	}
 
 	HANDLE Process::CreateRemoteThreadEx(LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter) {
-#ifdef LIQUID_HOOK_EX_SYSCALL
-		// Need a real handle for CreateRemoteThread
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+		if (IsTarget32()) {
+			// x86 target — m_hProc opened via Win32 OpenProcess, use directly
+			return CreateRemoteThread(m_hProc, NULL, 0, lpStartAddress, lpParameter, 0, NULL);
+		}
+		// x64 syscall path — m_hProc is a syscall-obtained handle that may lack
+		// PROCESS_CREATE_THREAD; open a fresh Win32 handle for thread creation.
 		HANDLE hProc = OpenProcess(
 			PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION,
 			FALSE, pProcId
@@ -505,29 +577,11 @@ namespace LiquidHookEx {
 			return NULL;
 		}
 
-		HANDLE hThread = CreateRemoteThread(
-			hProc,
-			NULL,
-			0,
-			lpStartAddress,
-			lpParameter,
-			0,
-			NULL
-		);
-
+		HANDLE hThread = CreateRemoteThread(hProc, NULL, 0, lpStartAddress, lpParameter, 0, NULL);
 		CloseHandle(hProc);
 		return hThread;
 #else
-		// Normal mode - use existing handle
-		return CreateRemoteThread(
-			m_hProc,
-			NULL,
-			0,
-			lpStartAddress,
-			lpParameter,
-			0,
-			NULL
-		);
+		return CreateRemoteThread(m_hProc, NULL, 0, lpStartAddress, lpParameter, 0, NULL);
 #endif
 	}
 
@@ -548,7 +602,19 @@ namespace LiquidHookEx {
 		uintptr_t vtablePtr = ReadDirect<uintptr_t>(pThis);
 		if (!vtablePtr) return vtable;
 
-		vtable = ReadArray<uintptr_t>(vtablePtr, count);
+		vtable.reserve(count);
+		const size_t stride = TargetPtrSize();
+		for (size_t i = 0; i < count; ++i) {
+			uintptr_t entry = 0;
+			if (IsTarget64())
+				Read(vtablePtr + i * stride, reinterpret_cast<uint64_t*>(&entry));
+			else {
+				uint32_t entry32 = 0;
+				Read(vtablePtr + i * stride, &entry32);
+				entry = entry32;
+			}
+			vtable.push_back(entry);
+		}
 		return vtable;
 	}
 

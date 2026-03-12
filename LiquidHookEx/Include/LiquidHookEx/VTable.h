@@ -78,13 +78,20 @@ namespace LiquidHookEx {
                 return false;
             }
 
+            // ── architecture guard ───────────────────────────────────────
+            if (!(m_pProc ? m_pProc : LiquidHookEx::proc)->IsTarget64()) {
+                printf("[!] %s::Hook => You are trying to use VTable on a 32-bit process. Use VTable86 instead.\n",
+                    m_szName.c_str());
+                return false;
+            }
+
             if (TryRestore<HOOK_DATA>()) {
                 printf("[+] %s: restored from saved state\n", m_szName.c_str());
                 return true;
             }
 
             // ── locate module ────────────────────────────────────────────
-            auto pMod = (m_pProc ? m_pProc : LiquidHookEx::proc)->GetRemoteModule(dllName.c_str());
+            auto pMod = (m_pProc ? m_pProc : LiquidHookEx::proc)->GetRemoteModule(dllName.c_str(),false);
             if (!pMod || !pMod->IsValid()) {
                 printf("[!] %s: failed to get %s\n", m_szName.c_str(), dllName.c_str());
                 return false;
@@ -103,9 +110,134 @@ namespace LiquidHookEx {
                 printf("[!] %s: vtable lookup failed\n", m_szName.c_str());
                 return false;
             }
-            m_pTargetFunction = vTableInfo.vTableAddr + (vTableInfo.index * 8);
+            const size_t ptrSize = (m_pProc ? m_pProc : LiquidHookEx::proc)->TargetPtrSize();
+            m_pTargetFunction = vTableInfo.vTableAddr + (vTableInfo.index * ptrSize);
 
-            uint64_t originalFunc = (m_pProc ? m_pProc : LiquidHookEx::proc)->ReadDirect<uint64_t>(m_pTargetFunction);
+            uint64_t originalFunc = 0;
+            if ((m_pProc ? m_pProc : LiquidHookEx::proc)->IsTarget64())
+                originalFunc = (m_pProc ? m_pProc : LiquidHookEx::proc)->ReadDirect<uint64_t>(m_pTargetFunction);
+            else
+                originalFunc = (m_pProc ? m_pProc : LiquidHookEx::proc)->ReadDirect<uint32_t>(m_pTargetFunction);
+            printf("[+] %s: original fn @ 0x%llX\n", m_szName.c_str(), originalFunc);
+
+            // ── allocate & write remote hook data ────────────────────────
+            m_pDataRemote = (m_pProc ? m_pProc : LiquidHookEx::proc)->Alloc(sizeof(HOOK_DATA));
+            if (!m_pDataRemote) {
+                printf("[!] %s: failed to alloc hook data\n", m_szName.c_str());
+                return false;
+            }
+
+            reinterpret_cast<BaseHookData*>(&initData)->pOriginalFunc = originalFunc;
+            (m_pProc ? m_pProc : LiquidHookEx::proc)->Write<HOOK_DATA>(
+                reinterpret_cast<uintptr_t>(m_pDataRemote), initData);
+
+            // ── allocate remote orig storage (for Unhook only) ───────────
+            // This is NOT what gets written into RIP slots. It exists solely so
+            // Unhook() can recover the original function address to restore the vtable.
+            m_pOrigStorage = (m_pProc ? m_pProc : LiquidHookEx::proc)->Alloc(8);
+            if (!m_pOrigStorage) {
+                printf("[!] %s: failed to alloc orig storage\n", m_szName.c_str());
+                return false;
+            }
+            (m_pProc ? m_pProc : LiquidHookEx::proc)->Write<uint64_t>(
+                reinterpret_cast<uintptr_t>(m_pOrigStorage), originalFunc);
+
+            // ── copy shellcode ───────────────────────────────────────────
+            size_t shellcodeSize =
+                reinterpret_cast<uintptr_t>(fnEnd) -
+                reinterpret_cast<uintptr_t>(fnStart);
+
+            m_pShellcodeRemote = (m_pProc ? m_pProc : LiquidHookEx::proc)->Alloc(
+                shellcodeSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+            if (!m_pShellcodeRemote) {
+                printf("[!] %s: failed to alloc shellcode\n", m_szName.c_str());
+                return false;
+            }
+
+            std::vector<uint8_t> localCode(shellcodeSize);
+            memcpy(localCode.data(), fnStart, shellcodeSize);
+
+            if (!(m_pProc ? m_pProc : LiquidHookEx::proc)->WriteArray(
+                reinterpret_cast<uintptr_t>(m_pShellcodeRemote), localCode)) {
+                printf("[!] %s: failed to write shellcode\n", m_szName.c_str());
+                return false;
+            }
+
+            printf("[+] %s: shellcode @ 0x%p (%zu bytes)\n",
+                m_szName.c_str(), m_pShellcodeRemote, shellcodeSize);
+
+            // ── patch RIP slots ──────────────────────────────────────────
+            if (!PatchRipSlots(localCode, shellcodeSize, fnStart, originalFunc, ripSlots)) {
+                printf("[!] %s: RIP patching failed\n", m_szName.c_str());
+                return false;
+            }
+
+            // ── install vtable hook ──────────────────────────────────────
+            if (!InstallVTableHook()) {
+                printf("[!] %s: vtable install failed\n", m_szName.c_str());
+                return false;
+            }
+
+            m_bIsHooked = true;
+            printf("[+] %s: hook installed\n\n", m_szName.c_str());
+
+            SaveConfig();
+            return true;
+        }
+
+        template <typename HOOK_DATA>
+            requires std::is_base_of_v<BaseHookData, HOOK_DATA>
+        bool HookUsingAddr(
+            uintptr_t pFnAddr,
+            std::string          dllName,
+            HOOK_DATA            initData,
+            void* fnStart,
+            void* fnEnd,
+            std::vector<RipSlot> ripSlots)
+        {
+            if (m_bIsHooked) {
+                printf("[!] %s: already hooked\n", m_szName.c_str());
+                return false;
+            }
+
+            // ── architecture guard ───────────────────────────────────────
+            if (!(m_pProc ? m_pProc : LiquidHookEx::proc)->IsTarget64()) {
+                printf("[!] %s::Hook => You are trying to use VTable on a 32-bit process. Use VTable86 instead.\n",
+                    m_szName.c_str());
+                return false;
+            }
+
+            if (TryRestore<HOOK_DATA>()) {
+                printf("[+] %s: restored from saved state\n", m_szName.c_str());
+                return true;
+            }
+
+            // ── locate module ────────────────────────────────────────────
+            auto pMod = (m_pProc ? m_pProc : LiquidHookEx::proc)->GetRemoteModule(dllName.c_str(),false);
+            if (!pMod || !pMod->IsValid()) {
+                printf("[!] %s: failed to get %s\n", m_szName.c_str(), dllName.c_str());
+                return false;
+            }
+
+       
+            if (!pFnAddr) {
+                printf("[!] %s: pattern not found\n", m_szName.c_str());
+                return false;
+            }
+
+            auto vTableInfo = pMod->FindVTableContainingFunction(pFnAddr);
+            if (!vTableInfo.vTableAddr || vTableInfo.index < 0) {
+                printf("[!] %s: vtable lookup failed for 0x%p\n", m_szName.c_str(), pFnAddr);
+                return false;
+            }
+            const size_t ptrSize = (m_pProc ? m_pProc : LiquidHookEx::proc)->TargetPtrSize();
+            m_pTargetFunction = vTableInfo.vTableAddr + (vTableInfo.index * ptrSize);
+
+            uint64_t originalFunc = 0;
+            if ((m_pProc ? m_pProc : LiquidHookEx::proc)->IsTarget64())
+                originalFunc = (m_pProc ? m_pProc : LiquidHookEx::proc)->ReadDirect<uint64_t>(m_pTargetFunction);
+            else
+                originalFunc = (m_pProc ? m_pProc : LiquidHookEx::proc)->ReadDirect<uint32_t>(m_pTargetFunction);
             printf("[+] %s: original fn @ 0x%llX\n", m_szName.c_str(), originalFunc);
 
             // ── allocate & write remote hook data ────────────────────────
@@ -181,16 +313,21 @@ namespace LiquidHookEx {
             uint64_t originalFunc = (m_pProc ? m_pProc : LiquidHookEx::proc)->ReadDirect<uint64_t>(
                 reinterpret_cast<uintptr_t>(m_pOrigStorage));
 
+            const size_t ptrSize = (m_pProc ? m_pProc : LiquidHookEx::proc)->TargetPtrSize();
+
             DWORD oldProtect;
             VirtualProtectEx((m_pProc ? m_pProc : LiquidHookEx::proc)->m_hProc,
                 reinterpret_cast<void*>(m_pTargetFunction),
-                8, PAGE_READWRITE, &oldProtect);
+                ptrSize, PAGE_READWRITE, &oldProtect);
 
-            (m_pProc ? m_pProc : LiquidHookEx::proc)->Write<uint64_t>(m_pTargetFunction, originalFunc);
+            if ((m_pProc ? m_pProc : LiquidHookEx::proc)->IsTarget64())
+                (m_pProc ? m_pProc : LiquidHookEx::proc)->Write<uint64_t>(m_pTargetFunction, originalFunc);
+            else
+                (m_pProc ? m_pProc : LiquidHookEx::proc)->Write<uint32_t>(m_pTargetFunction, static_cast<uint32_t>(originalFunc));
 
             VirtualProtectEx((m_pProc ? m_pProc : LiquidHookEx::proc)->m_hProc,
                 reinterpret_cast<void*>(m_pTargetFunction),
-                8, oldProtect, &oldProtect);
+                ptrSize, oldProtect, &oldProtect);
 
             // Free remote slot allocations
             for (const auto& rs : m_RemoteSlots) {
@@ -275,8 +412,11 @@ namespace LiquidHookEx {
                 }
             }
 
-            uint64_t currentVtableEntry =
-                (m_pProc ? m_pProc : LiquidHookEx::proc)->ReadDirect<uint64_t>(entry->targetFunction);
+            uint64_t currentVtableEntry = 0;
+            if ((m_pProc ? m_pProc : LiquidHookEx::proc)->IsTarget64())
+                currentVtableEntry = (m_pProc ? m_pProc : LiquidHookEx::proc)->ReadDirect<uint64_t>(entry->targetFunction);
+            else
+                currentVtableEntry = (m_pProc ? m_pProc : LiquidHookEx::proc)->ReadDirect<uint32_t>(entry->targetFunction);
             if (currentVtableEntry != entry->shellcodeRemote) {
                 printf("[HookConfig] %s: vtable no longer points to shellcode – discarding\n",
                     m_szName.c_str());
@@ -474,19 +614,29 @@ namespace LiquidHookEx {
 
         bool InstallVTableHook()
         {
+            const size_t ptrSize = (m_pProc ? m_pProc : LiquidHookEx::proc)->TargetPtrSize();
+
             DWORD oldProtect;
             if (!VirtualProtectEx((m_pProc ? m_pProc : LiquidHookEx::proc)->m_hProc,
                 reinterpret_cast<void*>(m_pTargetFunction),
-                8, PAGE_READWRITE, &oldProtect))
+                ptrSize, PAGE_READWRITE, &oldProtect))
                 return false;
 
-            bool ok = (m_pProc ? m_pProc : LiquidHookEx::proc)->Write<uint64_t>(
-                m_pTargetFunction,
-                reinterpret_cast<uint64_t>(m_pShellcodeRemote));
+            bool ok = false;
+            if ((m_pProc ? m_pProc : LiquidHookEx::proc)->IsTarget64()) {
+                ok = (m_pProc ? m_pProc : LiquidHookEx::proc)->Write<uint64_t>(
+                    m_pTargetFunction,
+                    reinterpret_cast<uint64_t>(m_pShellcodeRemote));
+            }
+            else {
+                ok = (m_pProc ? m_pProc : LiquidHookEx::proc)->Write<uint32_t>(
+                    m_pTargetFunction,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(m_pShellcodeRemote)));
+            }
 
             VirtualProtectEx((m_pProc ? m_pProc : LiquidHookEx::proc)->m_hProc,
                 reinterpret_cast<void*>(m_pTargetFunction),
-                8, oldProtect, &oldProtect);
+                ptrSize, oldProtect, &oldProtect);
 
             return ok;
         }
