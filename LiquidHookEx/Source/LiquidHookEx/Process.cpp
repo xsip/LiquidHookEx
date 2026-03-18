@@ -224,6 +224,64 @@ namespace LiquidHookEx {
 		return pRemote;
 	}
 
+
+
+	Process::Process() {
+		new (&remoteModuleList) std::map<std::string, RemoteModule*>{};
+	}
+
+	Process* Process::GetFromWndClass(std::string wndClassName, TargetArch targetArch) {
+		std::wstring wide(wndClassName.begin(), wndClassName.end());
+		HWND hWind = FindWindowW(wide.c_str(), nullptr);
+
+		auto p = new Process();
+
+		p->m_targetArch = targetArch;
+
+		p->m_hWnd = hWind;
+
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+		if (!p->InitializeSysCalls())
+			return nullptr;
+#endif
+
+		GetWindowThreadProcessId(hWind, &p->pProcId);
+
+
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+		if (p->IsTarget32()) {
+			p->m_hProc = OpenProcess(
+				PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION |
+				PROCESS_QUERY_INFORMATION | PROCESS_CREATE_THREAD,
+				FALSE, p->pProcId
+			);
+		}
+		else {
+			p->m_hProc = SyscallManager::OpenProcessDirect(
+				p->pProcId,
+				PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION |
+				PROCESS_QUERY_INFORMATION | PROCESS_CREATE_THREAD
+			);
+		}
+#else
+		m_hProc = OpenProcess(
+			PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION |
+			PROCESS_QUERY_INFORMATION | PROCESS_CREATE_THREAD,
+			FALSE, pProcId
+		);
+#endif
+		wchar_t exePath[MAX_PATH] = {};
+		DWORD size = MAX_PATH;
+		QueryFullProcessImageNameW(p->m_hProc, 0, exePath, &size);
+
+		wchar_t* exeName = wcsrchr(exePath, L'\\');
+		const wchar_t* nameStart = exeName ? exeName + 1 : exePath;
+
+		p->m_szProcName = std::string(nameStart, nameStart + wcslen(nameStart));
+
+		return p;
+	}
+
 	void* Process::AllocateAndWriteString(std::string str) {
 
 		size_t strLength = str.length() + 1;

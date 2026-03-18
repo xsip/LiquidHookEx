@@ -108,10 +108,12 @@ namespace LiquidHookEx {
 		bool InitializeSysCalls();
 		void GetProcHandle();
 		MODULEINFO GetModuleInfoEx(std::string m_Name);
+		Process();
 
 	public:
 		HWND GetHwnd();
 		Process(std::string szProcName, TargetArch targetArch = TargetArch::x64);
+		static Process* GetFromWndClass(std::string wndClassName, TargetArch targetArch = TargetArch::x64);
 		PVOID Alloc(size_t size, DWORD fFLags = MEM_COMMIT | MEM_RESERVE, DWORD fAccess = PAGE_READWRITE);
 
 		template <typename T>
