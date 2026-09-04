@@ -52,6 +52,7 @@ namespace LiquidHookEx {
 		std::vector<Section> GetSections();
 		VTableFunctionInfo FindVTableContainingFunction(uintptr_t fn);
 		uint8_t* ScanMemory(const char* signature);
+		std::vector <uint8_t*> ScanMemoryMulti(const char* signature);
 		uint32_t ResolveDisp32(uint8_t* instruction, uint32_t dwSkipBytes = 0);
 		uintptr_t ResolveRIP(uint8_t* pAddr, DWORD dwRip = 0x3, DWORD dwSize = 0x7);
 		uintptr_t ResolveRIP(uintptr_t pAddr, DWORD dwRip = 0x3, DWORD dwSize = 0x7);

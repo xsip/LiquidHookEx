@@ -128,6 +128,11 @@ namespace LiquidHookEx {
 		return Memory::ScanMemory(m_pBase, m_pSize, signature);
 	}
 
+	std::vector <uint8_t*> RemoteModule::ScanMemoryMulti(const char* signature) {
+		return Memory::ScanMemoryMulti(m_pBase, m_pSize, signature);
+
+	}
+
 	uintptr_t RemoteModule::ResolveRIP(uint8_t* pAddr, DWORD dwRip, DWORD dwSize) {
 		return ResolveRIP(reinterpret_cast<uintptr_t>(pAddr), dwRip, dwSize);
 	}
