@@ -132,7 +132,7 @@ namespace LiquidHookEx {
 		}
 
 		DWORD GetProcId() { return pProcId; };
-
+		std::string GetProcName() { return m_szProcName; };
 		void* AllocateAndWriteString(std::string str);
 		VTableFunctionInfo FindVTableContainingFunction(uintptr_t fn, std::string szMod);
 
