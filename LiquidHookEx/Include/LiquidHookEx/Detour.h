@@ -339,7 +339,7 @@ namespace LiquidHookEx {
                 return false;
             }
 
-            m_targetFuncAddr = reinterpret_cast<uintptr_t>(pFn);
+            m_targetFuncAddr = pFn;
             printf("[+] %s: target fn @ module+0x%llX\n",
                 m_szName.c_str(), m_targetFuncAddr - pMod->GetAddr());
 
