@@ -292,6 +292,158 @@ namespace LiquidHookEx {
             return true;
         }
 
+        // ── Hook ────────────────────────────────────────────────────────────────
+        //
+        // stolenBytes: number of prologue bytes to snapshot and overwrite.
+        //   0  = default to 14 (minimum for FF 25 patch).
+        //   >0 = caller-specified. Must be >= 14 and must cover only complete
+        //        instructions — never cut mid-instruction.
+        //
+        template <typename HOOK_DATA>
+            requires std::is_base_of_v<BaseHookData, HOOK_DATA>
+        bool Hook(
+            uintptr_t         pFn,
+            std::string          dllName,
+            HOOK_DATA            initData,
+            void* fnStart,
+            void* fnEnd,
+            std::vector<RipSlot> ripSlots,
+            uint8_t              stolenBytes = 0)
+        {
+            if (m_bIsHooked) {
+                printf("[!] %s: already hooked\n", m_szName.c_str());
+                return false;
+            }
+
+            // ── architecture guard ───────────────────────────────────
+            if (!(m_pProc ? m_pProc : LiquidHookEx::proc)->IsTarget64()) {
+                printf("[!] %s::Hook => You are trying to use Detour on a 32-bit process. Use Detour86 instead.\n",
+                    m_szName.c_str());
+                return false;
+            }
+
+            if (TryRestore<HOOK_DATA>()) {
+                printf("[+] %s: restored from saved state\n", m_szName.c_str());
+                return true;
+            }
+
+            // ── locate module ────────────────────────────────────────────────
+            auto pMod = (m_pProc ? m_pProc : LiquidHookEx::proc)->GetRemoteModule(dllName.c_str(), false);
+            if (!pMod || !pMod->IsValid()) {
+                printf("[!] %s: failed to get %s\n", m_szName.c_str(), dllName.c_str());
+                return false;
+            }
+
+            if (!pFn) {
+                printf("[!] %s: Fn is not valid\n", m_szName.c_str());
+                return false;
+            }
+
+            m_targetFuncAddr = reinterpret_cast<uintptr_t>(pFn);
+            printf("[+] %s: target fn @ module+0x%llX\n",
+                m_szName.c_str(), m_targetFuncAddr - pMod->GetAddr());
+
+            // ── determine stolen byte count ──────────────────────────────────
+            // Minimum 14: 6 (FF 25 xx xx xx xx) + 8 (absolute address).
+            // The caller is responsible for ensuring this covers only complete
+            // instructions — we do not embed a length disassembler.
+            if (stolenBytes == 0)
+                stolenBytes = 14;
+
+            if (stolenBytes < 14) {
+                printf("[!] %s: stolenBytes %u is less than 14 — clamping to 14\n",
+                    m_szName.c_str(), stolenBytes);
+                stolenBytes = 14;
+            }
+
+            if (stolenBytes > sizeof(m_stolenBytes)) {
+                printf("[!] %s: stolenBytes %u exceeds internal limit (%zu)\n",
+                    m_szName.c_str(), stolenBytes, sizeof(m_stolenBytes));
+                return false;
+            }
+
+            // ── snapshot prologue bytes ──────────────────────────────────────
+            if (!(m_pProc ? m_pProc : LiquidHookEx::proc)->Read(
+                m_targetFuncAddr, m_stolenBytes, stolenBytes)) {
+                printf("[!] %s: failed to read prologue bytes\n", m_szName.c_str());
+                return false;
+            }
+
+            m_stolenByteCount = stolenBytes;
+
+            printf("[+] %s: stolen bytes (%u): ", m_szName.c_str(), m_stolenByteCount);
+            for (int i = 0; i < m_stolenByteCount; ++i)
+                printf("%02X ", m_stolenBytes[i]);
+            printf("\n");
+
+            // ── allocate & write remote hook data ────────────────────────────
+            m_pDataRemote = (m_pProc ? m_pProc : LiquidHookEx::proc)->Alloc(sizeof(HOOK_DATA));
+            if (!m_pDataRemote) {
+                printf("[!] %s: failed to alloc hook data\n", m_szName.c_str());
+                return false;
+            }
+
+            (m_pProc ? m_pProc : LiquidHookEx::proc)->Write<HOOK_DATA>(
+                reinterpret_cast<uintptr_t>(m_pDataRemote), initData);
+            printf("[+] %s: hook data @ 0x%p\n", m_szName.c_str(), m_pDataRemote);
+
+            // ── copy shellcode ────────────────────────────────────────────────
+            size_t shellcodeSize =
+                reinterpret_cast<uintptr_t>(fnEnd) -
+                reinterpret_cast<uintptr_t>(fnStart);
+
+            m_pShellcodeRemote = (m_pProc ? m_pProc : LiquidHookEx::proc)->Alloc(
+                shellcodeSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+            if (!m_pShellcodeRemote) {
+                printf("[!] %s: failed to alloc shellcode\n", m_szName.c_str());
+                return false;
+            }
+
+            std::vector<uint8_t> localCode(shellcodeSize);
+            memcpy(localCode.data(), fnStart, shellcodeSize);
+
+            if (!(m_pProc ? m_pProc : LiquidHookEx::proc)->WriteArray(
+                reinterpret_cast<uintptr_t>(m_pShellcodeRemote), localCode)) {
+                printf("[!] %s: failed to write shellcode\n", m_szName.c_str());
+                return false;
+            }
+
+            printf("[+] %s: shellcode @ 0x%p (%zu bytes)\n",
+                m_szName.c_str(), m_pShellcodeRemote, shellcodeSize);
+
+            // ── build & write trampoline ──────────────────────────────────────
+            if (!BuildTrampoline()) {
+                printf("[!] %s: trampoline build failed\n", m_szName.c_str());
+                return false;
+            }
+
+            // ── patch RIP slots ───────────────────────────────────────────────
+            if (!PatchRipSlots(localCode, shellcodeSize, fnStart, ripSlots)) {
+                printf("[!] %s: RIP patching failed\n", m_szName.c_str());
+                return false;
+            }
+
+            // ── flush shellcode & trampoline ──────────────────────────────────
+            FlushInstructionCache((m_pProc ? m_pProc : LiquidHookEx::proc)->m_hProc,
+                m_pShellcodeRemote, shellcodeSize);
+            FlushInstructionCache((m_pProc ? m_pProc : LiquidHookEx::proc)->m_hProc,
+                m_pTrampolineRemote,
+                m_stolenByteCount + 14);  // stolen bytes + FF 25 + addr
+
+            // ── install FF 25 patch ───────────────────────────────────────────
+            if (!InstallDetourPatch()) {
+                printf("[!] %s: detour patch failed\n", m_szName.c_str());
+                return false;
+            }
+
+            m_bIsHooked = true;
+            printf("[+] %s: hook installed\n\n", m_szName.c_str());
+
+            SaveConfig();
+            return true;
+        }
+
+
         // ── Unhook ───────────────────────────────────────────────────────────────
         bool Unhook()
         {
