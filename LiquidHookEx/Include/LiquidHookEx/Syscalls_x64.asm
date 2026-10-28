@@ -61,6 +61,14 @@ Syscall_NtProtectVirtualMemory PROC
     ret
 Syscall_NtProtectVirtualMemory ENDP
 
+; NtQueryVirtualMemory syscall stub
+Syscall_NtQueryVirtualMemory PROC
+    mov r10, rcx
+    mov eax, DWORD PTR [g_syscall_NtQueryVirtualMemory]
+    syscall
+    ret
+Syscall_NtQueryVirtualMemory ENDP
+
 ; NtCreateThreadEx syscall stub
 Syscall_NtCreateThreadEx PROC
     mov r10, rcx

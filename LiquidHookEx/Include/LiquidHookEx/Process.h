@@ -117,6 +117,32 @@ namespace LiquidHookEx {
 		static Process* GetFromWndClass(std::string wndClassName, TargetArch targetArch = TargetArch::x64);
 		PVOID Alloc(size_t size, DWORD fFLags = MEM_COMMIT | MEM_RESERVE, DWORD fAccess = PAGE_READWRITE);
 
+		// Like Alloc, but at an EXACT remote address (fails, doesn't relocate, if that region
+		// isn't free) - the primitive AllocNear below searches with.
+		PVOID AllocAt(PVOID desiredBase, size_t size, DWORD fFlags = MEM_COMMIT | MEM_RESERVE, DWORD fAccess = PAGE_READWRITE);
+
+		// Same information as VirtualQueryEx (MEMORY_BASIC_INFORMATION for the region
+		// containing address), read through the syscall-direct path on a syscall-mode x64
+		// target (see LIQUID_HOOK_EX_SYSCALL_X64) instead of calling the (hooked, on an
+		// anti-cheat-monitored target) Win32 API. False on failure.
+		bool QueryRegion(uintptr_t address, MEMORY_BASIC_INFORMATION& info);
+
+		// Allocates size bytes within +/-~2GB of nearAddr - needed when the allocation will
+		// hold a RIP-relative instruction copied from code AT nearAddr (a hook trampoline's
+		// stolen prologue bytes, see LiquidHookEx::Detour::BuildTrampoline): such an
+		// instruction's disp32 can only reach an address within a 32-bit signed offset of
+		// itself, so landing the copy anywhere else (which a plain Alloc - an unconstrained
+		// VirtualAllocEx/NtAllocateVirtualMemory - routinely does, there's no reason the OS
+		// would pick anywhere near a specific module) makes that instruction unfixably wrong
+		// no matter how its displacement gets rewritten. Walks outward from nearAddr through
+		// the target's real VAD layout (QueryRegion) looking for a free region big enough,
+		// preferring the first one found scanning forward then backward. Falls back to a
+		// plain (unconstrained) Alloc - logging why - if nothing turns up within range; a
+		// caller that actually needs the guarantee must check the result against nearAddr
+		// itself (same int32-range test as the RIP fixup math) rather than assume success here
+		// means "near enough".
+		PVOID AllocNear(uintptr_t nearAddr, size_t size, DWORD fFlags = MEM_COMMIT | MEM_RESERVE, DWORD fAccess = PAGE_EXECUTE_READWRITE);
+
 		template <typename T>
 		inline bool Read(uintptr_t m_Address, T* m_Buffer, SIZE_T m_Size)
 		{

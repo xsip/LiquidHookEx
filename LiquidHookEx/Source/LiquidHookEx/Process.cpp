@@ -214,12 +214,16 @@ namespace LiquidHookEx {
 	}
 
 	PVOID Process::Alloc(size_t size, DWORD fFLags, DWORD fAccess) {
+		return AllocAt(nullptr, size, fFLags, fAccess);
+	}
+
+	PVOID Process::AllocAt(PVOID desiredBase, size_t size, DWORD fFLags, DWORD fAccess) {
 #ifdef LIQUID_HOOK_EX_SYSCALL_X64
 		void* pRemote = IsTarget32()
-			? ::VirtualAllocEx(m_hProc, NULL, size, fFLags, fAccess)
-			: SyscallManager::AllocateMemoryDirect(m_hProc, size, fAccess);
+			? ::VirtualAllocEx(m_hProc, desiredBase, size, fFLags, fAccess)
+			: SyscallManager::AllocateMemoryDirect(m_hProc, size, fAccess, desiredBase);
 #else
-		void* pRemote = ::VirtualAllocEx(m_hProc, NULL, size, fFLags, fAccess);
+		void* pRemote = ::VirtualAllocEx(m_hProc, desiredBase, size, fFLags, fAccess);
 #endif
 
 		if (pRemote) {
@@ -227,6 +231,78 @@ namespace LiquidHookEx {
 		}
 
 		return pRemote;
+	}
+
+	bool Process::QueryRegion(uintptr_t address, MEMORY_BASIC_INFORMATION& info) {
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+		if (IsTarget32())
+			return ::VirtualQueryEx(m_hProc, reinterpret_cast<LPCVOID>(address), &info, sizeof(info)) == sizeof(info);
+		return SyscallManager::QueryMemoryDirect(m_hProc, reinterpret_cast<PVOID>(address), &info);
+#else
+		return ::VirtualQueryEx(m_hProc, reinterpret_cast<LPCVOID>(address), &info, sizeof(info)) == sizeof(info);
+#endif
+	}
+
+	PVOID Process::AllocNear(uintptr_t nearAddr, size_t size, DWORD fFlags, DWORD fAccess) {
+		// Comfortably under the true +/-2^31 signed-disp32 limit, leaving margin for the
+		// trampoline's own small size and for the probe loop's region-sized steps occasionally
+		// overshooting past nearAddr before this check catches it.
+		constexpr uintptr_t kMaxRange = 0x7FF00000;
+
+		SYSTEM_INFO si{};
+		GetSystemInfo(&si); // local call - allocation granularity is a fixed OS constant, not something that needs reading from the TARGET
+		const uintptr_t granularity = si.dwAllocationGranularity ? si.dwAllocationGranularity : 0x10000;
+
+		auto tryDirection = [&](bool forward) -> PVOID {
+			uintptr_t cursor = nearAddr;
+			for (int guard = 0; guard < 4096; guard++) // VAD-region count bound, not a byte-distance one
+			{
+				const uintptr_t distance = forward ? (cursor >= nearAddr ? cursor - nearAddr : 0)
+					: (nearAddr >= cursor ? nearAddr - cursor : (uintptr_t)-1 /* underflowed past address 0 */);
+				if (distance > kMaxRange)
+					return nullptr;
+
+				MEMORY_BASIC_INFORMATION mbi{};
+				if (!QueryRegion(cursor, mbi) || mbi.RegionSize == 0)
+					return nullptr; // end of a queryable range (or the query itself failed) - nothing further this direction
+
+				const uintptr_t regionBase = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+				if (mbi.State == MEM_FREE && mbi.RegionSize >= size)
+				{
+					const uintptr_t alignedBase = (regionBase + granularity - 1) & ~(granularity - static_cast<uintptr_t>(1));
+					if (alignedBase + size <= regionBase + mbi.RegionSize)
+					{
+						if (PVOID got = AllocAt(reinterpret_cast<PVOID>(alignedBase), size, fFlags, fAccess))
+							return got;
+					}
+				}
+
+				if (forward)
+				{
+					cursor = regionBase + mbi.RegionSize;
+				}
+				else
+				{
+					if (regionBase < granularity)
+						return nullptr; // would underflow past address 0
+					const uintptr_t next = regionBase - granularity;
+					if (next >= regionBase) // didn't actually move backward - avoid looping forever
+						return nullptr;
+					cursor = next;
+				}
+			}
+			return nullptr;
+		};
+
+		if (PVOID p = tryDirection(true))
+			return p;
+		if (PVOID p = tryDirection(false))
+			return p;
+
+		printf("[!] AllocNear: no free region within 0x%llX of 0x%llX - falling back to an "
+			"unconstrained allocation (a RIP-relative fixup relying on this WILL be wrong)\n",
+			static_cast<unsigned long long>(kMaxRange), static_cast<unsigned long long>(nearAddr));
+		return Alloc(size, fFlags, fAccess);
 	}
 
 

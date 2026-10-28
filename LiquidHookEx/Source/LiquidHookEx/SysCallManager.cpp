@@ -188,6 +188,21 @@ NTSTATUS SyscallManager::SyscallNtProtectVirtualMemory(
     return Syscall_NtProtectVirtualMemory(ProcessHandle, BaseAddress, NumberOfBytesToProtect, NewAccessProtection, OldAccessProtection);
 }
 
+NTSTATUS SyscallManager::SyscallNtQueryVirtualMemory(
+    HANDLE ProcessHandle,
+    PVOID BaseAddress,
+    ULONG MemoryInformationClass,
+    PVOID MemoryInformation,
+    SIZE_T MemoryInformationLength,
+    PSIZE_T ReturnLength
+) {
+    if (!s_NtQueryVirtualMemory.initialized) {
+        return STATUS_NOT_IMPLEMENTED;
+    }
+    return Syscall_NtQueryVirtualMemory(ProcessHandle, BaseAddress, MemoryInformationClass,
+        MemoryInformation, MemoryInformationLength, ReturnLength);
+}
+
 NTSTATUS SyscallManager::SyscallNtCreateThreadEx(
     PHANDLE ThreadHandle,
     ACCESS_MASK DesiredAccess,
@@ -241,8 +256,8 @@ bool SyscallManager::WriteMemoryDirect(HANDLE hProcess, PVOID address, PVOID buf
     return (status == STATUS_SUCCESS && bytesWritten == size);
 }
 
-PVOID SyscallManager::AllocateMemoryDirect(HANDLE hProcess, SIZE_T size, ULONG protect) {
-    PVOID baseAddress = nullptr;
+PVOID SyscallManager::AllocateMemoryDirect(HANDLE hProcess, SIZE_T size, ULONG protect, PVOID desiredBase) {
+    PVOID baseAddress = desiredBase;
     SIZE_T regionSize = size;
 
     NTSTATUS status = SyscallNtAllocateVirtualMemory(
@@ -255,11 +270,22 @@ PVOID SyscallManager::AllocateMemoryDirect(HANDLE hProcess, SIZE_T size, ULONG p
     );
 
     if (status != STATUS_SUCCESS) {
-        std::cerr << "[!] NtAllocateVirtualMemory failed: 0x" << std::hex << status << std::dec << std::endl;
+        // Not logged as an error when a specific base was requested - a caller probing for a
+        // free region near a target address (Process::AllocNear) expects plenty of these as
+        // it walks past already-occupied ones, that's not a failure worth alarming over.
+        if (!desiredBase)
+            std::cerr << "[!] NtAllocateVirtualMemory failed: 0x" << std::hex << status << std::dec << std::endl;
         return nullptr;
     }
 
     return baseAddress;
+}
+
+bool SyscallManager::QueryMemoryDirect(HANDLE hProcess, PVOID address, MEMORY_BASIC_INFORMATION* info) {
+    SIZE_T returned = 0;
+    NTSTATUS status = SyscallNtQueryVirtualMemory(hProcess, address, 0 /* MemoryBasicInformation */,
+        info, sizeof(MEMORY_BASIC_INFORMATION), &returned);
+    return status == STATUS_SUCCESS && returned == sizeof(MEMORY_BASIC_INFORMATION);
 }
 
 bool SyscallManager::FreeMemoryDirect(HANDLE hProcess, PVOID address) {

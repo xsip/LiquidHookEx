@@ -104,6 +104,15 @@ public:
         PULONG OldAccessProtection
     );
 
+    static NTSTATUS SyscallNtQueryVirtualMemory(
+        HANDLE ProcessHandle,
+        PVOID BaseAddress,
+        ULONG MemoryInformationClass,
+        PVOID MemoryInformation,
+        SIZE_T MemoryInformationLength,
+        PSIZE_T ReturnLength
+    );
+
     static NTSTATUS SyscallNtCreateThreadEx(
         PHANDLE ThreadHandle,
         ACCESS_MASK DesiredAccess,
@@ -121,8 +130,18 @@ public:
     static HANDLE OpenProcessDirect(DWORD processId, ACCESS_MASK desiredAccess);
     static bool ReadMemoryDirect(HANDLE hProcess, PVOID address, PVOID buffer, SIZE_T size);
     static bool WriteMemoryDirect(HANDLE hProcess, PVOID address, PVOID buffer, SIZE_T size);
-    static PVOID AllocateMemoryDirect(HANDLE hProcess, SIZE_T size, ULONG protect);
+    // desiredBase: nullptr (default) lets the kernel pick anywhere, same as before. Non-null
+    // is a REQUIRED base (not just a hint) - NtAllocateVirtualMemory fails if that exact
+    // region isn't free, same as VirtualAllocEx with an explicit lpAddress. Used by
+    // Process::AllocNear to land a trampoline within a hooked function's own +/-2GB
+    // (a RIP-relative instruction carried over into it can't reach further than that).
+    static PVOID AllocateMemoryDirect(HANDLE hProcess, SIZE_T size, ULONG protect, PVOID desiredBase = nullptr);
     static bool FreeMemoryDirect(HANDLE hProcess, PVOID address);
+    // MemoryInformationClass 0 (MemoryBasicInformation) is the only class this is used for -
+    // same information VirtualQueryEx reports, read directly so a syscall-mode target (see
+    // LIQUID_HOOK_EX_SYSCALL_X64) doesn't have to go through the hooked Win32 API for this
+    // either. False on failure - *info is then not meaningfully filled in.
+    static bool QueryMemoryDirect(HANDLE hProcess, PVOID address, MEMORY_BASIC_INFORMATION* info);
     static HANDLE CreateRemoteThreadDirect(HANDLE hProcess, PVOID startAddress, PVOID parameter);
 };
 
@@ -183,6 +202,15 @@ extern "C" {
         PSIZE_T NumberOfBytesToProtect,
         ULONG NewAccessProtection,
         PULONG OldAccessProtection
+    );
+
+    NTSTATUS Syscall_NtQueryVirtualMemory(
+        HANDLE ProcessHandle,
+        PVOID BaseAddress,
+        ULONG MemoryInformationClass,
+        PVOID MemoryInformation,
+        SIZE_T MemoryInformationLength,
+        PSIZE_T ReturnLength
     );
 
     NTSTATUS Syscall_NtCreateThreadEx(

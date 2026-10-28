@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <cstring>
 #include <LiquidHookEx/Process.h>
 #include <LiquidHookEx/Config.h>
 #include <LiquidHookEx/Globals.h>
@@ -76,6 +77,20 @@
 //      count manually. Common prologues are 14+ bytes of complete instructions.
 //    - Any bytes beyond 14 become NOPs in the target function (after the patch)
 //      and are included in the trampoline so the stolen region is complete.
+//
+//  prologueRipFixups (optional, defaults to none): byte offset of each
+//  RIP-relative instruction's disp32 field within the stolen bytes. A stolen
+//  instruction that addresses something "[RIP + disp]" (a static-init guard
+//  check, a literal load, ...) is NOT safe to copy verbatim - the trampoline
+//  runs from a different address, so an unfixed one reads/writes the wrong
+//  memory and crashes the first time that instruction actually executes.
+//  BuildTrampoline rewrites each listed displacement so it still reaches the
+//  SAME absolute address from the trampoline's location. This library has no
+//  disassembler of its own - the caller (typically a tool that already
+//  decoded the prologue to pick stolenBytes safely, e.g. the SDK generator's
+//  Core::LengthDisasm::ScanPrologue) supplies these offsets; passing stolenBytes
+//  without checking for this is how a hook that "should" work crashes only
+//  once the hooked function is actually called.
 // ============================================================================
 
 namespace LiquidHookEx {
@@ -122,6 +137,17 @@ namespace LiquidHookEx {
         Process* m_pProc;
         std::string m_szName;
 
+        // Byte offset (within the stolen prologue, i.e. within the trampoline's own copy of
+        // it) of each RIP-relative instruction's disp32 field - set by Hook() just before
+        // BuildTrampoline(), which rewrites each one so it still reaches the same absolute
+        // address from the trampoline's (different) location. See BuildTrampoline's own
+        // comment for why a plain byte-for-byte copy of the stolen bytes is wrong whenever the
+        // prologue contains one of these (e.g. a static-init guard check compiled right into
+        // the function's first few instructions) - this is NOT optional cleanup, an unfixed
+        // RIP-relative load/store reads/writes the wrong address and reliably crashes the
+        // target the first time the trampoline actually runs that instruction.
+        std::vector<size_t> m_ripFixupOffsets{};
+
         void* m_pShellcodeRemote{};
         void* m_pDataRemote{};
         void* m_pTrampolineRemote{};  // stolen bytes + jmp back into original fn
@@ -155,8 +181,10 @@ namespace LiquidHookEx {
             void* fnStart,
             void* fnEnd,
             std::vector<RipSlot> ripSlots,
-            uint8_t              stolenBytes = 0)
+            uint8_t              stolenBytes = 0,
+            std::vector<size_t>  prologueRipFixups = {})
         {
+            m_ripFixupOffsets = std::move(prologueRipFixups);
             if (m_bIsHooked) {
                 printf("[!] %s: already hooked\n", m_szName.c_str());
                 return false;
@@ -308,8 +336,10 @@ namespace LiquidHookEx {
             void* fnStart,
             void* fnEnd,
             std::vector<RipSlot> ripSlots,
-            uint8_t              stolenBytes = 0)
+            uint8_t              stolenBytes = 0,
+            std::vector<size_t>  prologueRipFixups = {})
         {
+            m_ripFixupOffsets = std::move(prologueRipFixups);
             if (m_bIsHooked) {
                 printf("[!] %s: already hooked\n", m_szName.c_str());
                 return false;
@@ -546,8 +576,15 @@ namespace LiquidHookEx {
         {
             const size_t trampolineSize = m_stolenByteCount + 14;
 
-            m_pTrampolineRemote = (m_pProc ? m_pProc : LiquidHookEx::proc)->Alloc(
-                trampolineSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+            // AllocNear, not plain Alloc: any RIP-relative instruction carried over in the
+            // stolen bytes (m_ripFixupOffsets) can only be made to reach the right address
+            // from somewhere within ~2GB of the ORIGINAL function - an unconstrained
+            // allocation routinely lands nowhere near it (see Process::AllocNear's own
+            // comment). Harmless to always use even with no fixups - it's still a valid
+            // address for the trampoline's own FF 25 jump-back, which is absolute, not
+            // RIP-relative.
+            m_pTrampolineRemote = (m_pProc ? m_pProc : LiquidHookEx::proc)->AllocNear(
+                m_targetFuncAddr, trampolineSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
             if (!m_pTrampolineRemote) {
                 printf("[!] %s: failed to alloc trampoline\n", m_szName.c_str());
                 return false;
@@ -558,6 +595,38 @@ namespace LiquidHookEx {
 
             // Part 1: stolen prologue bytes
             tramp.insert(tramp.end(), m_stolenBytes, m_stolenBytes + m_stolenByteCount);
+
+            // Fix up any RIP-relative instruction carried over in the stolen bytes - it was
+            // compiled to address something relative to the ORIGINAL function's address, and
+            // is about to start running from the TRAMPOLINE's address instead. Every stolen
+            // byte keeps the same relative offset in both places, so the new displacement is
+            // just the old one shifted by (original addr - trampoline addr) - no need to know
+            // the instruction's own length or where it ends, that term cancels out exactly.
+            // Caller-supplied (m_ripFixupOffsets, from Core::LengthDisasm at SDK-generation
+            // time, which actually decoded the prologue) - never guessed here.
+            const int64_t shift = static_cast<int64_t>(m_targetFuncAddr) -
+                static_cast<int64_t>(reinterpret_cast<uintptr_t>(m_pTrampolineRemote));
+            // AllocNear should have kept this within signed-32-bit range (same range a RIP
+            // disp32 needs) - but it falls back to an unconstrained allocation when nothing
+            // nearby was free, so this is checked rather than assumed. A fixup that doesn't
+            // fit can't be made correct by any disp32 value - it's reported, not silently
+            // written wrong, since a wrong one is strictly worse than a loud warning (it
+            // crashes just as hard, later, with no clue why).
+            const bool shiftFits = shift >= INT32_MIN && shift <= INT32_MAX;
+            if (!m_ripFixupOffsets.empty() && !shiftFits)
+                printf("[!] %s: trampoline landed outside +/-2GB of the target function - "
+                    "%zu RIP-relative fixup(s) can't be made correct\n",
+                    m_szName.c_str(), m_ripFixupOffsets.size());
+
+            for (size_t dispOffset : m_ripFixupOffsets)
+            {
+                if (dispOffset + 4 > tramp.size() || !shiftFits)
+                    continue; // out of range for this stolenByteCount, or unfixable - see above
+                int32_t oldDisp;
+                memcpy(&oldDisp, &tramp[dispOffset], sizeof(oldDisp));
+                const int32_t newDisp = static_cast<int32_t>(oldDisp + shift);
+                memcpy(&tramp[dispOffset], &newDisp, sizeof(newDisp));
+            }
 
             // Part 2: FF 25 00 00 00 00 — jmp qword ptr [rip+0]
             tramp.push_back(0xFF);
