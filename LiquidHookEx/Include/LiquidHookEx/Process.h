@@ -160,6 +160,7 @@ namespace LiquidHookEx {
 		DWORD GetProcId() { return pProcId; };
 		std::string GetProcName() { return m_szProcName; };
 		void* AllocateAndWriteString(std::string str);
+		void* AllocateAndWriteWideString(const std::wstring& str);
 		VTableFunctionInfo FindVTableContainingFunction(uintptr_t fn, std::string szMod);
 
 
@@ -305,6 +306,8 @@ namespace LiquidHookEx {
 			Read(m_Address, &m_Buffer, sizeof(T));
 			return reinterpret_cast<T2>(m_Buffer);
 		}
+
+		bool WriteBuffer(uintptr_t address, const void* buffer, SIZE_T size);
 
 		template <typename T>
 		inline bool Write(uintptr_t m_Address, T m_Buffer)

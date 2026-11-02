@@ -380,6 +380,56 @@ namespace LiquidHookEx {
 		return pRemoteStr;
 	}
 
+	bool Process::WriteBuffer(uintptr_t address, const void* buffer, SIZE_T size)
+	{
+		if (!buffer || size == 0)
+			return false;
+
+		SIZE_T bytesWritten = 0;
+
+#ifdef LIQUID_HOOK_EX_SYSCALL_X64
+		if (!IsTarget32()) {
+			return SyscallManager::WriteMemoryDirect(
+				m_hProc,
+				reinterpret_cast<PVOID>(address),
+				const_cast<PVOID>(buffer),
+				size
+			);
+		}
+#endif
+
+		BOOL result = ::WriteProcessMemory(
+			m_hProc,
+			reinterpret_cast<LPVOID>(address),
+			buffer,
+			size,
+			&bytesWritten
+		);
+
+		return result && bytesWritten == size;
+	}
+
+
+	void* Process::AllocateAndWriteWideString(const std::wstring& str)
+	{
+		const SIZE_T byteLength =
+			(str.length() + 1) * sizeof(wchar_t);
+
+		void* remoteStr = Alloc(byteLength);
+		if (!remoteStr)
+			return nullptr;
+
+		if (!WriteBuffer(
+			reinterpret_cast<uintptr_t>(remoteStr),
+			str.c_str(),
+			byteLength)) {
+			return nullptr;
+		}
+
+		return remoteStr;
+	}
+
+
 	VTableFunctionInfo RemoteModule::FindVTableContainingFunction(uintptr_t fn)
 	{
 		if (!IsValid()) {
