@@ -697,30 +697,59 @@ namespace LiquidHookEx {
 
 	MODULEINFO Process::GetModuleInfoEx(std::string m_Name)
 	{
-		HMODULE m_Modules[1337];
-		DWORD m_Needed = 0x0;
+		HMODULE m_Modules[1337]{};
+		DWORD m_Needed = 0;
 
-		if (!K32EnumProcessModules(m_hProc, m_Modules, sizeof(m_Modules), &m_Needed)) {
-			printf("Error: 0x%x\n", GetLastError());
+		if (!K32EnumProcessModules(
+			m_hProc,
+			m_Modules,
+			sizeof(m_Modules),
+			&m_Needed))
+		{
+			printf("K32EnumProcessModules failed: 0x%lx\n", GetLastError());
 			return {};
 		}
 
-		DWORD m_Count = (m_Needed / sizeof(HMODULE));
-		for (DWORD i = 0; m_Count > i; ++i)
+		const DWORD m_Count =
+			(std::min<DWORD>(m_Needed, sizeof(m_Modules)) / sizeof(HMODULE));
+
+		for (DWORD i = 0; i < m_Count; ++i)
 		{
-			char m_ModuleFileName[MAX_PATH] = { 0 };
-			if (!K32GetModuleFileNameExA(m_hProc, m_Modules[i], m_ModuleFileName, sizeof(m_ModuleFileName)))
+			char m_ModuleFileName[MAX_PATH]{};
+
+			if (!K32GetModuleFileNameExA(
+				m_hProc,
+				m_Modules[i],
+				m_ModuleFileName,
+				static_cast<DWORD>(sizeof(m_ModuleFileName))))
+			{
+				continue;
+			}
+
+			// Extract basename from the module path.
+			const char* m_BaseName = strrchr(m_ModuleFileName, '\\');
+			m_BaseName = m_BaseName ? m_BaseName + 1 : m_ModuleFileName;
+
+			// Case-insensitive exact basename comparison.
+			if (_stricmp(m_BaseName, m_Name.c_str()) != 0)
 				continue;
 
-			if (strstr(m_ModuleFileName, ("\\" + m_Name).c_str()))
+			MODULEINFO m_ModuleInfo{};
+
+			if (!K32GetModuleInformation(
+				m_hProc,
+				m_Modules[i],
+				&m_ModuleInfo,
+				sizeof(m_ModuleInfo)))
 			{
-				MODULEINFO m_ModuleInfo = { 0 };
-				if (!K32GetModuleInformation(m_hProc, m_Modules[i], &m_ModuleInfo, sizeof(MODULEINFO)))
-					return {};
-				return m_ModuleInfo;
+				printf("K32GetModuleInformation failed: 0x%lx\n", GetLastError());
+				return {};
 			}
+
+			return m_ModuleInfo;
 		}
 
+		printf("Module not found: %s\n", m_Name.c_str());
 		return {};
 	}
 
