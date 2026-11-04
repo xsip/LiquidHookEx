@@ -12,3 +12,4 @@
 
 #include <LiquidHookEx/Globals.h>
 #include <LiquidHookEx/Macros.h>
+#include <LiquidHookEx/PrologueScanner.h>
