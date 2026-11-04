@@ -256,6 +256,134 @@ namespace LiquidHookEx {
             return true;
         }
 
+        // ── Hook ────────────────────────────────────────────────────────────────
+        //
+        // overwriteSize: total bytes to snapshot and restore on Unhook().
+        //   0  = auto-detect from the call instruction (default, works for most cases).
+        //   >0 = caller-specified override. Use this when the original call site is
+        //        followed by instruction(s) that must also be NOP'd out — i.e. when
+        //        the region to atomically replace is wider than just the call itself.
+        //        Must be >= 6 (the size of FF 15). Any bytes beyond 6 become NOPs.
+        //
+        template <typename HOOK_DATA>
+            requires std::is_base_of_v<BaseHookData, HOOK_DATA>
+        bool Hook(
+            uintptr_t            pFn,
+            std::string          dllName,
+            HOOK_DATA            initData,
+            void* fnStart,
+            void* fnEnd,
+            std::vector<RipSlot> ripSlots,
+            uint8_t              overwriteSize = 0)
+        {
+            if (m_bIsHooked) {
+                printf("[!] %s: already hooked\n", m_szName.c_str());
+                return false;
+            }
+
+            // ── architecture guard ───────────────────────────────────────────
+            if (!(m_pProc ? m_pProc : LiquidHookEx::proc)->IsTarget64()) {
+                printf("[!] %s::Hook => You are trying to use CallSite on a 32-bit process. Use CallSite86 instead.\n",
+                    m_szName.c_str());
+                return false;
+            }
+
+            if (TryRestore<HOOK_DATA>()) {
+                printf("[+] %s: restored from saved state\n", m_szName.c_str());
+                return true;
+            }
+
+            // ── locate module ────────────────────────────────────────────────
+            auto pMod = (m_pProc ? m_pProc : LiquidHookEx::proc)->GetRemoteModule(dllName.c_str(),false);
+            if (!pMod || !pMod->IsValid()) {
+                printf("[!] %s: failed to get %s\n", m_szName.c_str(), dllName.c_str());
+                return false;
+            }
+
+            if (!pFn) {
+                printf("[!] %s: call site is not valid\n", m_szName.c_str());
+                return false;
+            }
+
+            m_callSiteAddr = pFn;
+            printf("[+] %s: call site @ module+0x%llX\n",
+                m_szName.c_str(), m_callSiteAddr - pMod->GetAddr());
+
+            // ── resolve original call target & snapshot original bytes ───────
+            if (!SnapshotAndResolveCallSite(pMod, overwriteSize)) {
+                printf("[!] %s: failed to resolve call site\n", m_szName.c_str());
+                return false;
+            }
+
+            printf("[+] %s: original bytes (%u): ", m_szName.c_str(), m_originalByteCount);
+            for (int i = 0; i < m_originalByteCount; ++i)
+                printf("%02X ", m_originalBytes[i]);
+            printf("\n");
+
+            if (m_originalFuncAddr)
+                printf("[+] %s: original fn @ 0x%llX\n", m_szName.c_str(), m_originalFuncAddr);
+            else
+                printf("[~] %s: could not resolve original fn addr (indirect call form)\n", m_szName.c_str());
+
+            // ── allocate & write remote hook data ────────────────────────────
+            m_pDataRemote = (m_pProc ? m_pProc : LiquidHookEx::proc)->Alloc(sizeof(HOOK_DATA));
+            if (!m_pDataRemote) {
+                printf("[!] %s: failed to alloc hook data\n", m_szName.c_str());
+                return false;
+            }
+
+            (m_pProc ? m_pProc : LiquidHookEx::proc)->Write<HOOK_DATA>(reinterpret_cast<uintptr_t>(m_pDataRemote), initData);
+            printf("[+] %s: hook data @ 0x%p\n", m_szName.c_str(), m_pDataRemote);
+
+            // ── copy shellcode ────────────────────────────────────────────────
+            size_t shellcodeSize =
+                reinterpret_cast<uintptr_t>(fnEnd) -
+                reinterpret_cast<uintptr_t>(fnStart);
+
+            m_pShellcodeRemote = (m_pProc ? m_pProc : LiquidHookEx::proc)->Alloc(
+                shellcodeSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+            if (!m_pShellcodeRemote) {
+                printf("[!] %s: failed to alloc shellcode\n", m_szName.c_str());
+                return false;
+            }
+
+            std::vector<uint8_t> localCode(shellcodeSize);
+            memcpy(localCode.data(), fnStart, shellcodeSize);
+
+            if (!(m_pProc ? m_pProc : LiquidHookEx::proc)->WriteArray(
+                reinterpret_cast<uintptr_t>(m_pShellcodeRemote), localCode)) {
+                printf("[!] %s: failed to write shellcode\n", m_szName.c_str());
+                return false;
+            }
+
+            printf("[+] %s: shellcode @ 0x%p (%zu bytes)\n",
+                m_szName.c_str(), m_pShellcodeRemote, shellcodeSize);
+
+            // ── patch RIP slots ───────────────────────────────────────────────
+            if (!PatchRipSlots(localCode, shellcodeSize, fnStart, ripSlots)) {
+                printf("[!] %s: RIP patching failed\n", m_szName.c_str());
+                return false;
+            }
+
+            // ── flush shellcode ───────────────────────────────────────────────
+            if (!FlushInstructionCache((m_pProc ? m_pProc : LiquidHookEx::proc)->m_hProc,
+                m_pShellcodeRemote, shellcodeSize))
+                printf("[~] %s: FlushInstructionCache failed (%lu)\n",
+                    m_szName.c_str(), GetLastError());
+
+            // ── install FF 15 call site patch ─────────────────────────────────
+            if (!InstallCallSitePatch()) {
+                printf("[!] %s: call site patch failed\n", m_szName.c_str());
+                return false;
+            }
+
+            m_bIsHooked = true;
+            printf("[+] %s: hook installed\n\n", m_szName.c_str());
+
+            SaveConfig();
+            return true;
+        }
+
         // ── Unhook ───────────────────────────────────────────────────────────────
         bool Unhook()
         {

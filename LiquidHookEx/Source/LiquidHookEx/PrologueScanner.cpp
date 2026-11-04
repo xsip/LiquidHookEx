@@ -1,6 +1,7 @@
 
 #include <LiquidHookEx/PrologueScanner.h>
-
+#include <LiquidHookEx/Globals.h>
+#include <LiquidHookEx/Process.h>
 
 
 
@@ -305,6 +306,78 @@ namespace LiquidHookEx {
         }
         scan.totalLength = total;
         return scan;
+    }
+
+    namespace {
+        // Reads up to 32 bytes at `addr` from the live process and scans them for a
+        // complete-instruction boundary at or past minBytes. Same "never guess" contract
+        // as ScanPrologue: an empty result means the read failed or no safe boundary was
+        // found within the 32 bytes read.
+        PrologueScanResult ScanAt(uintptr_t addr, size_t minBytes)
+        {
+            if (!addr)
+                return {};
+
+            uint8_t buf[32]{};
+            if (!LiquidHookEx::proc->Read(addr, buf, sizeof(buf)))
+                return {};
+
+            return ScanPrologue(buf, sizeof(buf), minBytes);
+        }
+    }
+
+    // See Detour::Hook's pattern-form overload: resolves the module, scans it for
+    // `callSitePattern`, then reads/scans the bytes at the match.
+    PrologueScanResult GetCallSiteOverwriteSize(std::string callSitePattern, std::string dllName)
+    {
+        auto pMod = LiquidHookEx::proc->GetRemoteModule(dllName, false);
+        if (!pMod || !pMod->IsValid())
+            return {};
+
+        auto pCallSite = pMod->ScanMemory(callSitePattern.c_str());
+        if (!pCallSite)
+            return {};
+
+        return ScanAt(reinterpret_cast<uintptr_t>(pCallSite), 6);
+    }
+
+    // See Detour::Hook's address-form overload: dllName is only used to validate the
+    // module is present, same as Detour does for its module+offset logging.
+    PrologueScanResult GetCallSiteOverwriteSize(uintptr_t pFn, std::string dllName)
+    {
+        auto pMod = LiquidHookEx::proc->GetRemoteModule(dllName, false);
+        if (!pMod || !pMod->IsValid())
+            return {};
+
+        if (!pFn)
+            return {};
+
+        return ScanAt(pFn, 6);
+    }
+
+    PrologueScanResult GetStolenBytesForDetour(std::string pattern, std::string dllName)
+    {
+        auto pMod = LiquidHookEx::proc->GetRemoteModule(dllName, false);
+        if (!pMod || !pMod->IsValid())
+            return {};
+
+        auto pFn = pMod->ScanMemory(pattern.c_str());
+        if (!pFn)
+            return {};
+
+        return ScanAt(reinterpret_cast<uintptr_t>(pFn), 14);
+    }
+
+    PrologueScanResult GetStolenBytesForDetour(uintptr_t pFn, std::string dllName)
+    {
+        auto pMod = LiquidHookEx::proc->GetRemoteModule(dllName, false);
+        if (!pMod || !pMod->IsValid())
+            return {};
+
+        if (!pFn)
+            return {};
+
+        return ScanAt(pFn, 14);
     }
 
 }
