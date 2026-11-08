@@ -129,6 +129,7 @@ namespace LiquidHookEx {
 
             if (op2 == 0x1F) { info.hasModRM = true; return info; } // multi-byte nop Ev
             if (op2 >= 0x80 && op2 <= 0x8F) { info.immSize = 4; return info; } // Jcc rel32
+            if (op2 >= 0x40 && op2 <= 0x4F) { info.hasModRM = true; return info; } // CMOVcc Gv,Ev
             if (op2 == 0xA2) { return info; } // cpuid
             if (op2 == 0xAF) { info.hasModRM = true; return info; } // imul r,r/m
             if (op2 == 0xB6 || op2 == 0xB7) { info.hasModRM = true; return info; } // movzx
