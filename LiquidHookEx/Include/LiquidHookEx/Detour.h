@@ -665,9 +665,15 @@ namespace LiquidHookEx {
             int patched = 0;
 
             for (size_t i = 0; i + 7 <= shellcodeSize; ++i) {
-                if (localCode[i] != 0x48) continue;
+                // Match MOV r64, [RIP+disp32] for every destination register.
+                // The older 48 8B 05 check only handled RAX; compiler-generated
+                // shellcode can use RCX/RDX/etc. for a second access to the same
+                // global (for example when storing a counter), leaving that RIP
+                // reference pointed back into the injector's address space.
+                if ((localCode[i] & 0xF8) != 0x48) continue;
+                if ((localCode[i] & 0x08) == 0) continue; // Require REX.W / r64.
                 if (localCode[i + 1] != 0x8B) continue;
-                if (localCode[i + 2] != 0x05) continue;
+                if ((localCode[i + 2] & 0xC7) != 0x05) continue; // mod=00, r/m=101.
 
                 int32_t   localDisp = *reinterpret_cast<int32_t*>(&localCode[i + 3]);
                 uintptr_t localRip = reinterpret_cast<uintptr_t>(fnStart) + i + 7;
