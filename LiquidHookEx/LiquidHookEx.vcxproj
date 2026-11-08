@@ -150,6 +150,7 @@
     <ClInclude Include="Include\LiquidHookEx\Macros.h" />
     <ClInclude Include="Include\LiquidHookEx\Pattern.h" />
     <ClInclude Include="Include\LiquidHookEx\Process.h" />
+    <ClInclude Include="Include\LiquidHookEx\PrologueScanner.h" />
     <ClInclude Include="Include\LiquidHookEx\ShellCodeDll86.h" />
     <ClInclude Include="Include\LiquidHookEx\SysCallManager.h" />
     <ClInclude Include="Include\LiquidHookEx\VTable.h" />
@@ -159,6 +160,7 @@
     <ClCompile Include="Source\LiquidHookEx\Globals.cpp" />
     <ClCompile Include="Source\LiquidHookEx\Pattern.cpp" />
     <ClCompile Include="Source\LiquidHookEx\Process.cpp" />
+    <ClCompile Include="Source\LiquidHookEx\PrologueScanner.cpp" />
     <ClCompile Include="Source\LiquidHookEx\SysCallManager.cpp" />
   </ItemGroup>
   <ItemGroup>

@@ -57,6 +57,9 @@
     <ClInclude Include="Include\LiquidHookEx\VTable86.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\LiquidHookEx\PrologueScanner.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\LiquidHookEx\Process.cpp">
@@ -69,6 +72,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\LiquidHookEx\Globals.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\LiquidHookEx\PrologueScanner.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
